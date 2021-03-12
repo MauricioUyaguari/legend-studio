@@ -1,5 +1,14 @@
 # @finos/legend-studio-plugin-tracer-zipkin
 
+## 0.0.8
+
+### Patch Changes
+
+- Updated dependencies [[`c0cb6e2`](https://github.com/finos/legend-studio/commit/c0cb6e23acced19135bcb9122ad74d9ff0a02a96), [`e01d74f`](https://github.com/finos/legend-studio/commit/e01d74fac0a0befd01621c285244cf5732bb3a39)]:
+  - @finos/legend-studio@0.0.8
+  - @finos/legend-studio-network@0.0.7
+  - @finos/legend-studio-shared@0.0.5
+
 ## 0.0.7
 
 ### Patch Changes

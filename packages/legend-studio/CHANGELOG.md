@@ -1,5 +1,16 @@
 # @finos/legend-studio
 
+## 0.0.8
+
+### Patch Changes
+
+- [#114](https://github.com/finos/legend-studio/pull/114) [`e01d74f`](https://github.com/finos/legend-studio/commit/e01d74fac0a0befd01621c285244cf5732bb3a39) Thanks [@MauricioUyaguari](https://github.com/MauricioUyaguari)! - Change schemaMapper to schema in tableNameMapper to be align with protocol
+
+- Updated dependencies []:
+  - @finos/legend-studio-components@0.0.7
+  - @finos/legend-studio-network@0.0.7
+  - @finos/legend-studio-shared@0.0.5
+
 ## 0.0.7
 
 ### Patch Changes
