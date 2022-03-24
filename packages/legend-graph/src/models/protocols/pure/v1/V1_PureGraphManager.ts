@@ -23,6 +23,7 @@ import {
   SOURCE_INFORMATION_KEY,
 } from '../../../../MetaModelConst';
 import {
+  type GenericClazz,
   type Clazz,
   type GeneratorFn,
   type Log,
@@ -39,6 +40,7 @@ import {
   promisify,
   type ActionState,
   StopWatch,
+  assertNonEmptyString,
 } from '@finos/legend-shared';
 import type { TEMPORARY__AbstractEngineConfig } from '../../../../graphManager/action/TEMPORARY__AbstractEngineConfig';
 import {
@@ -47,8 +49,11 @@ import {
   type GraphBuilderOptions,
   type ExecutionOptions,
 } from '../../../../graphManager/AbstractPureGraphManager';
-import type { Mapping } from '../../../metamodels/pure/packageableElements/mapping/Mapping';
-import type { Runtime } from '../../../metamodels/pure/packageableElements/runtime/Runtime';
+import { Mapping } from '../../../metamodels/pure/packageableElements/mapping/Mapping';
+import {
+  type Runtime,
+  EngineRuntime,
+} from '../../../metamodels/pure/packageableElements/runtime/Runtime';
 import type {
   ImportConfigurationDescription,
   ImportMode,
@@ -76,7 +81,11 @@ import type { ExecutionResult } from '../../../../graphManager/action/execution/
 import type { GenerationOutput } from '../../../../graphManager/action/generation/GenerationOutput';
 import type { ValueSpecification } from '../../../metamodels/pure/valueSpecification/ValueSpecification';
 import { ServiceExecutionMode } from '../../../../graphManager/action/service/ServiceExecutionMode';
-import { PureSingleExecution } from '../../../metamodels/pure/packageableElements/service/ServiceExecution';
+import {
+  KeyedExecutionParameter,
+  PureMultiExecution,
+  PureSingleExecution,
+} from '../../../metamodels/pure/packageableElements/service/ServiceExecution';
 import {
   V1_deserializeRawValueSpecification,
   V1_serializeRawValueSpecification,
@@ -208,13 +217,21 @@ import {
   GraphBuilderError,
   SystemGraphBuilderError,
 } from '../../../../graphManager/GraphManagerUtils';
-import { PackageableElementReference } from '../../../metamodels/pure/packageableElements/PackageableElementReference';
+import {
+  PackageableElementExplicitReference,
+  PackageableElementReference,
+} from '../../../metamodels/pure/packageableElements/PackageableElementReference';
 import type { GraphPluginManager } from '../../../../GraphPluginManager';
 import type { QuerySearchSpecification } from '../../../../graphManager/action/query/QuerySearchSpecification';
 import type { ExternalFormatDescription } from '../../../../graphManager/action/externalFormat/ExternalFormatDescription';
 import type { ConfigurationProperty } from '../../../metamodels/pure/packageableElements/fileGeneration/ConfigurationProperty';
 import { V1_ExternalFormatModelGenerationInput } from './engine/externalFormat/V1_ExternalFormatModelGeneration';
 import { GraphBuilderReport } from '../../../../graphManager/GraphBuilderReport';
+import { V1_buildMappingInclude } from './transformation/pureGraph/to/helpers/V1_MappingBuilderHelper';
+import {
+  V1_PureMultiExecution,
+  V1_PureSingleExecution,
+} from './model/packageableElements/service/V1_ServiceExecution';
 
 const V1_FUNCTION_SUFFIX_MULTIPLICITY_INFINITE = 'MANY';
 
@@ -2014,6 +2031,220 @@ export class V1_PureGraphManager extends AbstractPureGraphManager {
       await this.engine.getQuery(queryId),
       this.engine.getEngineServerClient().currentUserId,
     );
+  }
+
+  async indexEntitiesWithDependencyIntoGraph<T extends V1_PackageableElement>(
+    graph: PureModel,
+    entities: Entity[],
+    dependencyEntities: Map<string, Entity[]>,
+    filteredElementClazzes: GenericClazz<T>[],
+    options?: GraphBuilderOptions,
+  ): Promise<V1_GraphBuilderInput[]> {
+    const report = new GraphBuilderReport();
+    // build dependency pmcd models
+    const dependencyDataMap = new Map<string, V1_PureModelContextData>();
+    await Promise.all(
+      Array.from(dependencyEntities.entries()).map(
+        ([dependencyKey, _entities]) => {
+          const projectModelData = new V1_PureModelContextData();
+          dependencyDataMap.set(dependencyKey, projectModelData);
+          return V1_entitiesToPureModelContextData(
+            _entities,
+            projectModelData,
+            this.pluginManager.getPureProtocolProcessorPlugins(),
+          );
+        },
+      ),
+    );
+    const dependencyGraphBuilderInput: V1_GraphBuilderInput[] = Array.from(
+      dependencyDataMap.entries(),
+    ).map(([dependencyKey, dependencyData]) => ({
+      data: indexPureModelContextData(report, dependencyData, this.extensions),
+      model: graph.dependencyManager.getModel(dependencyKey),
+    }));
+    // build main pmcd
+    const data = new V1_PureModelContextData();
+    await V1_entitiesToPureModelContextData(
+      entities,
+      data,
+      this.pluginManager.getPureProtocolProcessorPlugins(),
+    );
+    const mainGraphBuilderInput: V1_GraphBuilderInput[] = [
+      {
+        model: graph,
+        data: indexPureModelContextData(report, data, this.extensions),
+      },
+    ];
+    const graphBuilderInput = [
+      ...dependencyGraphBuilderInput,
+      ...mainGraphBuilderInput,
+    ];
+    graphBuilderInput.forEach((e) => {
+      e.data.elements = e.data.elements.filter((el: V1_PackageableElement) =>
+        filteredElementClazzes.find((_clazz) => el instanceof _clazz),
+      );
+    });
+    await flowResult(this.initializeAndIndexElements(graph, graphBuilderInput));
+    return graphBuilderInput;
+  }
+
+  async buildCreateQueryLightGraph(
+    graph: PureModel,
+    entities: Entity[],
+    dependencyEntities: Map<string, Entity[]>,
+    options?: GraphBuilderOptions,
+  ): Promise<void> {
+    try {
+      const graphBuilderInput = await this.indexEntitiesWithDependencyIntoGraph(
+        graph,
+        entities,
+        dependencyEntities,
+        [V1_Mapping, V1_PackageableRuntime],
+        options,
+      );
+      // handle mapping includes
+      const mappings = [
+        ...graph.ownMappings,
+        ...graph.dependencyManager.mappings,
+      ];
+      const v1Mappings = graphBuilderInput
+        .map((e) =>
+          e.data.elements.filter(
+            (type: V1_PackageableElement): type is V1_Mapping =>
+              type instanceof V1_Mapping,
+          ),
+        )
+        .flat();
+      const context = new V1_GraphBuilderContextBuilder(
+        graph,
+        graph,
+        this.extensions,
+        this.log,
+      ).build();
+      // build include index for compatible runtime analysis
+      v1Mappings.forEach((element) => {
+        const mapping = mappings.find((e) => e.path === element.path);
+        if (mapping) {
+          mapping.includes = element.includedMappings.map((i) => {
+            assertNonEmptyString(
+              i.includedMappingPath,
+              `Mapping include 'includedMappingPath' field is missing or empty`,
+            );
+            return V1_buildMappingInclude(i, context, mapping);
+          });
+        }
+      });
+      // handle runtimes
+      const runtimes = [
+        ...graph.ownRuntimes,
+        ...graph.dependencyManager.runtimes,
+      ];
+      const v1Runtimes = graphBuilderInput
+        .map((e) =>
+          e.data.elements.filter(
+            (type: V1_PackageableElement): type is V1_PackageableRuntime =>
+              type instanceof V1_PackageableRuntime,
+          ),
+        )
+        .flat();
+      v1Runtimes.forEach((element) => {
+        const runtime = runtimes.find((e) => e.path === element.path);
+        if (runtime) {
+          const runtimeValue = new EngineRuntime();
+          runtime.setRuntimeValue(runtimeValue);
+          runtimeValue.setMappings(
+            element.runtimeValue.mappings.map((mapping) =>
+              context.resolveMapping(mapping.path),
+            ),
+          );
+        }
+      });
+      graph.buildState.pass();
+    } catch (error) {
+      assertErrorThrown(error);
+      graph.buildState.fail();
+      /**
+       * Wrap all error with `GraphBuilderError`, as we throw a lot of assertion error in the graph builder
+       * But we might want to rethink this decision in the future and throw appropriate type of error
+       */
+      throw error instanceof GraphBuilderError
+        ? error
+        : new GraphBuilderError(error);
+    }
+  }
+
+  async buildServiceQueryLightGraph(
+    graph: PureModel,
+    entities: Entity[],
+    dependencyEntities: Map<string, Entity[]>,
+    options?: GraphBuilderOptions,
+  ): Promise<void> {
+    try {
+      const graphBuilderInput = await this.indexEntitiesWithDependencyIntoGraph(
+        graph,
+        entities,
+        dependencyEntities,
+        [V1_Service],
+        options,
+      );
+      // handle servicess
+      const services = [
+        ...graph.ownServices,
+        ...graph.dependencyManager.services,
+      ];
+      const v1Services = graphBuilderInput
+        .map((e) =>
+          e.data.elements.filter(
+            (type: V1_PackageableElement): type is V1_Service =>
+              type instanceof V1_Service,
+          ),
+        )
+        .flat();
+      // build service multi execution keys
+      v1Services.forEach((element) => {
+        const service = services.find((e) => e.path === element.path);
+        if (service) {
+          const serviceExecution = element.execution;
+          if (serviceExecution instanceof V1_PureMultiExecution) {
+            const execution = new PureMultiExecution(
+              serviceExecution.executionKey,
+              RawLambda.createStub(),
+              service,
+            );
+            execution.executionParameters =
+              serviceExecution.executionParameters.map(
+                (keyedExecutionParameter) =>
+                  new KeyedExecutionParameter(
+                    keyedExecutionParameter.key,
+                    PackageableElementExplicitReference.create(new Mapping('')),
+                    new EngineRuntime(),
+                  ),
+              );
+            service.setExecution(execution);
+          } else if (serviceExecution instanceof V1_PureSingleExecution) {
+            service.setExecution(
+              new PureSingleExecution(
+                RawLambda.createStub(),
+                service,
+                PackageableElementExplicitReference.create(new Mapping('')),
+                new EngineRuntime(),
+              ),
+            );
+          }
+        }
+      });
+      graph.buildState.pass();
+    } catch (error) {
+      assertErrorThrown(error);
+      graph.buildState.fail();
+      /**
+       * Wrap all error with `GraphBuilderError`, as we throw a lot of assertion error in the graph builder
+       * But we might want to rethink this decision in the future and throw appropriate type of error
+       */
+      throw error instanceof GraphBuilderError
+        ? error
+        : new GraphBuilderError(error);
+    }
   }
 
   async getQuery(queryId: string, graph: PureModel): Promise<Query> {

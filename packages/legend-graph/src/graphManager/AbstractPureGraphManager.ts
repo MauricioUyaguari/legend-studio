@@ -62,6 +62,8 @@ import type { QuerySearchSpecification } from './action/query/QuerySearchSpecifi
 import type { ExternalFormatDescription } from './action/externalFormat/ExternalFormatDescription';
 import type { ConfigurationProperty } from '../models/metamodels/pure/packageableElements/fileGeneration/ConfigurationProperty';
 import type { GraphBuilderReport } from './GraphBuilderReport';
+import type { V1_PureModelContext } from '../models/protocols/pure/v1/model/context/V1_PureModelContext';
+import type { V1_PureModelContextData } from '../models/protocols/pure/v1/model/context/V1_PureModelContextData';
 
 export interface TEMPORARY__EngineSetupConfig {
   env: string;
@@ -335,6 +337,21 @@ export abstract class AbstractPureGraphManager {
   abstract createQuery(query: Query, graph: PureModel): Promise<Query>;
   abstract updateQuery(query: Query, graph: PureModel): Promise<Query>;
   abstract deleteQuery(queryId: string): Promise<void>;
+
+  //TODO: These methods will be removed once we have a way to `lazy` load elements into the graph
+  abstract buildCreateQueryLightGraph(
+    graph: PureModel,
+    entities: Entity[],
+    dependencyEntitiesMap: Map<string, Entity[]>,
+    options?: GraphBuilderOptions,
+  ): Promise<void>;
+
+  abstract buildServiceQueryLightGraph(
+    graph: PureModel,
+    entities: Entity[],
+    dependencyEntitiesMap: Map<string, Entity[]>,
+    options?: GraphBuilderOptions,
+  ): Promise<void>;
 
   // ------------------------------------------- Utilities -------------------------------------------
 
