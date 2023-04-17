@@ -42,7 +42,7 @@ import {
   getTestableResultFromAssertionStatus,
   TESTABLE_RESULT,
 } from '../../../sidebar-state/testable/GlobalTestRunnerState.js';
-import type { TestableTestEditorState } from './TestableEditorState.js';
+import type { TestableTestEditorState } from './TestableTestEditorState.js';
 
 export enum TEST_ASSERTION_TAB {
   ASSERTION_SETUP = 'ASSERTION_SETUP',

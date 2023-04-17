@@ -237,10 +237,33 @@ const TestableExplorerContextMenu = observer(
     const runTest = (): void => {
       testableState.run(node);
     };
-    const viewError = (err: TestError | AssertFail): void =>
-      globalTestRunnerState.setFailureViewing(err);
+    const viewError = (): void =>
+      globalTestRunnerState.setFailureViewing(error);
+    const open = (): void => {
+      if (node instanceof TestableTreeNodeData) {
+        globalTestRunnerState.openTestable(
+          testableState.testableMetadata.testable,
+        );
+      } else if (node instanceof TestSuiteTreeNodeData) {
+        globalTestRunnerState.openTestableSuite(
+          testableState.testableMetadata.testable,
+          node.testSuite,
+        );
+      } else if (node instanceof AtomicTestTreeNodeData) {
+        globalTestRunnerState.openTestableTest(
+          testableState.testableMetadata.testable,
+          node.atomicTest,
+        );
+      } else if (node instanceof AssertionTestTreeNodeData) {
+        globalTestRunnerState.openTestableAssertion(
+          testableState.testableMetadata.testable,
+          node.assertion,
+        );
+      }
+    };
     return (
       <MenuContent data-testid={LEGEND_STUDIO_TEST_ID.EXPLORER_CONTEXT_MENU}>
+        <MenuContentItem onClick={open}>Open Editor</MenuContentItem>
         <MenuContentItem
           disabled={globalTestRunnerState.isDispatchingAction}
           onClick={runTest}
@@ -311,7 +334,6 @@ const TestableTreeNodeContainer: React.FC<
     ),
   );
   const optionalError = getOptionalError(node, testableState);
-  // );
   const selectNode: React.MouseEventHandler = (event) => onNodeSelect?.(node);
 
   return (
@@ -481,7 +503,7 @@ export const GlobalTestRunner = observer(
                   disabled={isDispatchingAction}
                   onClick={reset}
                   tabIndex={-1}
-                  title="Run All Tests"
+                  title="Refresh"
                 >
                   <RefreshIcon />
                 </button>

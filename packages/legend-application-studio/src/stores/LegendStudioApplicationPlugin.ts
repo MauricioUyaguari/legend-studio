@@ -77,10 +77,18 @@ export type LegendStudioApplicationPageEntry = ApplicationPageEntry & {
   bypassSDLC?: boolean | undefined;
 };
 
-export type TestableMetadataGetter = (
+export type TestableExtension = {
+  metadata: TestableMetadata;
+  findTestableEditorState?: (
+    testable: Testable,
+    editorStore: EditorStore,
+  ) => TestableElementEditorState | undefined;
+};
+
+export type TestableExtensionGetter = (
   testable: Testable,
   editorStore: EditorStore,
-) => TestableMetadata | undefined;
+) => TestableExtension | undefined;
 
 export abstract class LegendStudioApplicationPlugin extends LegendApplicationPlugin {
   /**
@@ -128,7 +136,7 @@ export abstract class LegendStudioApplicationPlugin extends LegendApplicationPlu
   /**
    * Get the list of extension for testables
    */
-  getExtraTestableMetadata?(): TestableMetadataGetter[];
+  getExtraTestableExtensionGetters?(): TestableExtensionGetter[];
 }
 
 export type ElementClassifier = (

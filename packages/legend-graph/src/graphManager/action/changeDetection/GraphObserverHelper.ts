@@ -89,6 +89,7 @@ const observe_Abstract_BasicModel = (metamodel: BasicModel): void => {
     ownGenerationSpecifications: computed,
     ownDataElements: computed,
     ownExecutionEnvironments: computed,
+    ownTestables: computed,
 
     allOwnElements: computed,
   });

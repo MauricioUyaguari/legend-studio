@@ -39,8 +39,13 @@ import {
   PureMultiExecution,
   PureExecution,
   isStubbed_RawLambda,
+  TestAssertion,
+  TestSuite,
+  ServiceTest,
+  ServiceTestSuite,
+  Test,
 } from '@finos/legend-graph';
-import { ServiceTestableState } from './testable/ServiceTestableState.js';
+import type { TestableElementEditorState } from '../testable/TestableElementEditorState.js';
 import { User } from '@finos/legend-server-sdlc';
 
 export enum SERVICE_TAB {
@@ -51,7 +56,10 @@ export enum SERVICE_TAB {
 }
 
 export const MINIMUM_SERVICE_OWNERS = 2;
-export class ServiceEditorState extends ElementEditorState {
+export class ServiceEditorState
+  extends ElementEditorState
+  implements TestableElementEditorState
+{
   executionState: ServiceExecutionState;
   registrationState: ServiceRegistrationState;
   testableState: ServiceTestableState;
@@ -69,6 +77,10 @@ export class ServiceEditorState extends ElementEditorState {
       service: computed,
       reprocess: action,
       searchUsers: flow,
+      openTestable: action,
+      openTestableAssert: action,
+      openTestableSuite: action,
+      openTestableTest: action,
     });
 
     this.executionState = this.buildExecutionState();
@@ -86,6 +98,45 @@ export class ServiceEditorState extends ElementEditorState {
       query && !isStubbed_RawLambda(query)
         ? SERVICE_TAB.EXECUTION
         : SERVICE_TAB.GENERAL;
+    this.testable = this.service;
+  }
+
+  openTestable(): void {
+    this.setSelectedTab(SERVICE_TAB.TEST);
+  }
+
+  openTestableSuite(suite: TestSuite): void {
+    this.openTestable();
+    if (suite instanceof ServiceTestSuite) {
+      this.testableState.changeSuite(suite);
+    }
+  }
+
+  openTestableTest(test: Test): void {
+    if (test instanceof ServiceTest) {
+      const parent = test.__parent;
+      if (parent instanceof ServiceTestSuite) {
+        this.openTestableSuite(parent);
+        const suiteState = this.testableState.selectedSuiteState;
+        if (suiteState) {
+          suiteState.selectedTestState = suiteState.testStates.find(
+            (t) => t.test === test,
+          );
+        }
+      }
+    }
+  }
+
+  openTestableAssert(test: TestAssertion): void {
+    const parent = test.parentTest;
+    if (parent) {
+      this.openTestableTest(parent);
+      const testState =
+        this.testableState.selectedSuiteState?.selectedTestState;
+      if (testState) {
+        testState.openAssertion(test);
+      }
+    }
   }
 
   setSelectedTab(tab: SERVICE_TAB): void {
