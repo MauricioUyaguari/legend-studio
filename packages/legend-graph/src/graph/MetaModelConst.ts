@@ -180,6 +180,7 @@ export enum SUPPORTED_FUNCTIONS {
   ADJUST = 'meta::pure::functions::date::adjust',
   // variables
   LET = 'meta::pure::functions::lang::letFunction',
+  NEW = 'meta::pure::functions::meta::new',
 }
 
 // Date formats

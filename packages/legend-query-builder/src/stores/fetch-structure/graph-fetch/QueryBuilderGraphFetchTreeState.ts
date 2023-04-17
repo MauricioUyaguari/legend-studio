@@ -24,6 +24,8 @@ import {
   PackageableElementExplicitReference,
   RootGraphFetchTree,
   getAllSuperclasses,
+  LegendSerializationConfig,
+  observer_LegendSerializationConfig,
 } from '@finos/legend-graph';
 import {
   type QueryBuilderGraphFetchTreeData,
@@ -54,6 +56,19 @@ import {
 import { QUERY_BUILDER_HASH_STRUCTURE } from '../../../graphManager/QueryBuilderHashUtils.js';
 import { isValueExpressionReferencedInValue } from '../../QueryBuilderValueSpecificationHelper.js';
 
+const DEFAULT_CONFIG_TYPE_NAME = '@type';
+
+const createDefaultConfig = (): LegendSerializationConfig => {
+  const config = new LegendSerializationConfig(DEFAULT_CONFIG_TYPE_NAME);
+  config.includeType = true;
+  config.includeEnumType = true;
+  config.removePropertiesWithNullValues = true;
+  config.removePropertiesWithEmptySets = false;
+  config.fullyQualifiedTypePath = true;
+  config.includeObjectReference = false;
+  return observer_LegendSerializationConfig(config);
+};
+
 export class QueryBuilderGraphFetchTreeState
   extends QueryBuilderFetchStructureImplementationState
   implements Hashable
@@ -66,6 +81,8 @@ export class QueryBuilderGraphFetchTreeState
    */
   isChecked = false;
 
+  serializationConfig: LegendSerializationConfig | undefined;
+
   constructor(
     queryBuilderState: QueryBuilderState,
     fetchStructureState: QueryBuilderFetchStructureState,
@@ -76,6 +93,7 @@ export class QueryBuilderGraphFetchTreeState
       treeData: observable.ref,
       isChecked: observable,
       TEMPORARY__showPostFetchStructurePanel: computed,
+      toggleConfig: observable,
       setGraphFetchTree: action,
       setChecked: action,
     });
@@ -141,6 +159,14 @@ export class QueryBuilderGraphFetchTreeState
 
   get validationIssues(): string[] | undefined {
     return undefined;
+  }
+
+  toggleConfig(): void {
+    if (!this.serializationConfig) {
+      this.serializationConfig = createDefaultConfig();
+    } else {
+      this.serializationConfig = undefined;
+    }
   }
 
   setGraphFetchTree(val: QueryBuilderGraphFetchTreeData | undefined): void {

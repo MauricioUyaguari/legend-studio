@@ -76,6 +76,7 @@ export * from './graph/metamodel/pure/packageableElements/service/ExecutionEnvir
 export { RawLambda } from './graph/metamodel/pure/rawValueSpecification/RawLambda.js';
 export { RawVariableExpression } from './graph/metamodel/pure/rawValueSpecification/RawVariableExpression.js';
 export { INTERNAL__UnknownValueSpecification } from './graph/metamodel/pure/valueSpecification/INTERNAL__UnknownValueSpecification.js';
+export { LegendSerializationConfig } from './graph/metamodel/pure/valueSpecification/LegendSerializationConfig.js';
 export { VariableExpression } from './graph/metamodel/pure/valueSpecification/VariableExpression.js';
 export {
   AbstractPropertyExpression,

@@ -31,6 +31,7 @@ import type { Entity } from '@finos/legend-storage';
 import { SECTION_INDEX_ELEMENT_PATH } from '../graph/MetaModelConst.js';
 import type { GraphBuilderOptions } from './AbstractPureGraphManager.js';
 import type { PureGraphPlugin } from '../graph/PureGraphPlugin.js';
+import { Core_GraphManagerPreset } from '../Core_GraphManagerPreset.js';
 
 export class TEST__GraphManagerPluginManager
   extends AbstractPluginManager
@@ -79,11 +80,18 @@ export class TEST__GraphManagerPluginManager
 export const TEST__getTestGraphManagerState = (
   pluginManager?: GraphManagerPluginManager,
   logService?: LogService,
-): GraphManagerState =>
-  new GraphManagerState(
-    pluginManager ?? new TEST__GraphManagerPluginManager(),
-    logService ?? new LogService(),
-  );
+): GraphManagerState => {
+  let _pluginManager: GraphManagerPluginManager;
+  if (pluginManager) {
+    _pluginManager = pluginManager;
+  } else {
+    const _test = new TEST__GraphManagerPluginManager();
+    _test.usePresets([new Core_GraphManagerPreset()]);
+    _pluginManager = _test;
+  }
+
+  return new GraphManagerState(_pluginManager, logService ?? new LogService());
+};
 
 export const TEST__excludeSectionIndex = (entities: Entity[]): Entity[] =>
   entities.filter((entity) => entity.path !== SECTION_INDEX_ELEMENT_PATH);

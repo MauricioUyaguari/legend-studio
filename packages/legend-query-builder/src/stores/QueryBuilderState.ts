@@ -21,6 +21,7 @@ import {
   makeObservable,
   computed,
   flowResult,
+  toJS,
 } from 'mobx';
 import {
   type GeneratorFn,
@@ -412,6 +413,7 @@ export abstract class QueryBuilderState implements CommandRegistrar {
       this.resetQueryContent();
 
       if (!isStubbed_RawLambda(query)) {
+        console.log('hello');
         const valueSpec = observe_ValueSpecification(
           this.graphManagerState.graphManager.buildValueSpecification(
             this.graphManagerState.graphManager.serializeRawValueSpecification(
@@ -421,6 +423,7 @@ export abstract class QueryBuilderState implements CommandRegistrar {
           ),
           this.observerContext,
         );
+        console.log('x', toJS(valueSpec));
         const compiledValueSpecification = guaranteeType(
           valueSpec,
           LambdaFunctionInstanceValue,
@@ -436,6 +439,7 @@ export abstract class QueryBuilderState implements CommandRegistrar {
         this.setShowParametersPanel(true);
       }
     } catch (error) {
+      console.log('error', toJS(error));
       assertErrorThrown(error);
       this.resetQueryResult();
       this.resetQueryContent();

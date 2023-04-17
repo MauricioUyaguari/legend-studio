@@ -56,6 +56,7 @@ import {
   observe_GenericTypeReference,
   observe_PropertyReference,
 } from './DomainObserverHelper.js';
+import type { LegendSerializationConfig } from '../../../graph/metamodel/pure/valueSpecification/LegendSerializationConfig.js';
 
 const observe_Abstract_ValueSpecification = (
   metamodel: ValueSpecification,
@@ -308,6 +309,21 @@ class ValueSpecificationObserver implements ValueSpecificationVisitor<void> {
     );
   }
 }
+
+export const observer_LegendSerializationConfig = skipObserved(
+  (config: LegendSerializationConfig): LegendSerializationConfig => {
+    makeObservable(config, {
+      typeKeyName: observable,
+      includeType: observable,
+      includeEnumType: observable,
+      removePropertiesWithNullValues: observable,
+      removePropertiesWithEmptySets: observable,
+      fullyQualifiedTypePath: observable,
+      includeObjectReference: observable,
+    });
+    return config;
+  },
+);
 
 export const observe_ValueSpecification = skipObservedWithContext(
   (valueSpecification: ValueSpecification, context): ValueSpecification => {
