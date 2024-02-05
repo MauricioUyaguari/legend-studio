@@ -622,11 +622,10 @@ export class V1_EngineServerClient extends AbstractServerClient {
   _execution = (): string => `${this._pure()}/execution`;
   _executionManager = (): string => `${this._server()}/executionManager`;
 
-  execute = (
+  runQuery = (
     input: PlainObject<V1_ExecuteInput>,
     options?: {
       returnResultAsText?: boolean;
-      serializationFormat?: EXECUTION_SERIALIZATION_FORMAT | undefined;
     },
   ): Promise<PlainObject<V1_ExecutionResult> | Response> =>
     this.postWithTracing(
@@ -635,14 +634,36 @@ export class V1_EngineServerClient extends AbstractServerClient {
       this.debugPayload(input, CORE_ENGINE_ACTIVITY_TRACE.EXECUTE),
       {},
       undefined,
-      {
-        serializationFormat: options?.serializationFormat
-          ? getEngineSerializationFormat(options.serializationFormat)
-          : undefined,
-      },
+      undefined,
       { enableCompression: true },
       { skipProcessing: Boolean(options?.returnResultAsText) },
     );
+
+  exportData = (
+    input: PlainObject<V1_ExecuteInput>,
+    serializationFormat: EXECUTION_SERIALIZATION_FORMAT,
+    fileName: string,
+  ): void => {
+    const url = `${this._execution()}/download?serializationFormat=${getEngineSerializationFormat(
+      serializationFormat,
+    )}`;
+    const data = { executeInput: JSON.stringify(input) };
+    const document = window.document;
+    const form = document.createElement('form');
+    form.setAttribute('action', url);
+    form.setAttribute('method', 'POST');
+    form.setAttribute('display', 'none');
+    Object.getOwnPropertyNames(data).forEach((key) => {
+      const _input = document.createElement('input');
+      _input.setAttribute('display', 'none');
+      _input.setAttribute('name', key);
+      _input.setAttribute('value', data.executeInput);
+      form.appendChild(_input);
+    });
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+  };
 
   generatePlan = (
     input: PlainObject<V1_ExecuteInput>,
