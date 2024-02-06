@@ -256,9 +256,14 @@ export const getWebAppBaseWebpackConfig = (
         isEnvDevelopment ? '[name].[ext]' : '[name].[contenthash:8].[ext]'
       }`,
       publicPath: isEnvDevelopment ? '/' : appConfig.baseUrl,
-      filename: `${staticPath}/${
-        isEnvDevelopment ? '[name].js' : '[name].[contenthash:8].js'
-      }`,
+      filename: (pathData) => {
+        if (pathData.filename === 'ServiceWorker') {
+          return `[name].js`;
+        }
+        return `${staticPath}/${
+          isEnvDevelopment ? '[name].js' : '[name].[contenthash:8].js'
+        }`;
+      },
     },
     resolve: {
       ...baseConfig.resolve,
@@ -389,5 +394,7 @@ export const getWebAppBaseWebpackConfig = (
       }),
     ].filter(Boolean),
   };
+
+  console.log(config);
   return config;
 };

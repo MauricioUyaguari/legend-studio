@@ -11,7 +11,8 @@
     "src/**/*.json",
     // Limitation due to dependencies not ready for Typescript ESM
     // See https://github.com/microsoft/TypeScript/issues/49298
-    "src/search/CJS__Fuse.cts"
+    "src/search/CJS__Fuse.cts",
+    "ServiceWorker.ts"
   ],
   "references": [{ "path": "./tsconfig.package.json" }]
 }
