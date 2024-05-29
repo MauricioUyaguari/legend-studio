@@ -116,30 +116,36 @@ export class LegendQueryUserDataHelper {
     });
   }
 
-  static getRecentlyQueriedDataspaceList(service: UserDataService): SavedData {
+  static getRecentlyQueriedDataspacesInfo(service: UserDataService): SavedData {
     return LegendQueryUserDataHelper.getPersistedData(
       service,
       LEGEND_QUERY_USER_DATA_KEY.LAST_QUERY_DATASPACE,
     );
   }
 
-  static getRecentlyQueriedDataspace(
+  static getMostRecentDataspaceInfo(
     service: UserDataService,
   ): string | undefined {
     const dataspaceList =
-      LegendQueryUserDataHelper.getRecentlyQueriedDataspaceList(service);
+      LegendQueryUserDataHelper.getRecentlyQueriedDataspacesInfo(service);
     return dataspaceList[0];
   }
 
-  static saveRecentlyQueriedDataspace(
+  static addRecentlyQueriedDataspace(
     service: UserDataService,
     dataspace: string,
   ): void {
     const dataspaceList =
-      LegendQueryUserDataHelper.getRecentlyQueriedDataspaceList(service);
+      LegendQueryUserDataHelper.getRecentlyQueriedDataspacesInfo(service);
     LegendQueryUserDataHelper.persistValue(service, dataspace, dataspaceList, {
       limit: USER_DATA_QUERY_DATASPACE_LIMIT,
       key: LEGEND_QUERY_USER_DATA_KEY.LAST_QUERY_DATASPACE,
     });
   }
+
+
+
+
+
+
 }

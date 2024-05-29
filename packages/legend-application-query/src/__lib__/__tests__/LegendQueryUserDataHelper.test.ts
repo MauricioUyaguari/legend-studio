@@ -136,15 +136,15 @@ describe('LegendQueryUserDataHelper', () => {
         'extensions/dataspace/some-dataspace:test-demo-3:latest';
 
       const userDataService = getService();
-      LegendQueryUserDataHelper.saveRecentlyQueriedDataspace(
+      LegendQueryUserDataHelper.addRecentlyQueriedDataspace(
         userDataService,
         dataspace,
       );
-      LegendQueryUserDataHelper.saveRecentlyQueriedDataspace(
+      LegendQueryUserDataHelper.addRecentlyQueriedDataspace(
         userDataService,
         dataspace2,
       );
-      LegendQueryUserDataHelper.saveRecentlyQueriedDataspace(
+      LegendQueryUserDataHelper.addRecentlyQueriedDataspace(
         userDataService,
         dataspace3,
       );
@@ -152,7 +152,7 @@ describe('LegendQueryUserDataHelper', () => {
       const expected = [dataspace3, dataspace2, dataspace];
 
       expect(
-        LegendQueryUserDataHelper.getRecentlyQueriedDataspaceList(
+        LegendQueryUserDataHelper.getRecentlyQueriedDataspacesInfo(
           userDataService,
         ),
       ).toEqual(expected);
@@ -166,15 +166,15 @@ describe('LegendQueryUserDataHelper', () => {
         'extensions/dataspace/some-dataspace:test-demo-3:latest';
 
       const userDataService = getService();
-      LegendQueryUserDataHelper.saveRecentlyQueriedDataspace(
+      LegendQueryUserDataHelper.addRecentlyQueriedDataspace(
         userDataService,
         dataspace,
       );
-      LegendQueryUserDataHelper.saveRecentlyQueriedDataspace(
+      LegendQueryUserDataHelper.addRecentlyQueriedDataspace(
         userDataService,
         dataspace2,
       );
-      LegendQueryUserDataHelper.saveRecentlyQueriedDataspace(
+      LegendQueryUserDataHelper.addRecentlyQueriedDataspace(
         userDataService,
         dataspace3,
       );
@@ -182,7 +182,7 @@ describe('LegendQueryUserDataHelper', () => {
       const expected = dataspace3;
 
       expect(
-        LegendQueryUserDataHelper.getRecentlyQueriedDataspace(userDataService),
+        LegendQueryUserDataHelper.getMostRecentDataspaceInfo(userDataService),
       ).toEqual(expected);
     });
 
@@ -192,14 +192,14 @@ describe('LegendQueryUserDataHelper', () => {
       for (let i = 0; i < USER_DATA_QUERY_DATASPACE_LIMIT + 2; i++) {
         const dataspace = `extensions/dataspace/some-dataspace-${i}:test-demo:latest`;
 
-        LegendQueryUserDataHelper.saveRecentlyQueriedDataspace(
+        LegendQueryUserDataHelper.addRecentlyQueriedDataspace(
           userDataService,
           dataspace,
         );
       }
 
       expect(
-        LegendQueryUserDataHelper.getRecentlyQueriedDataspaceList(
+        LegendQueryUserDataHelper.getRecentlyQueriedDataspacesInfo(
           userDataService,
         ).length,
       ).toBe(USER_DATA_QUERY_DATASPACE_LIMIT);
