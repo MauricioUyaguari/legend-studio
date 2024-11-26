@@ -39,7 +39,7 @@ Service model::ModelToModelMappingService
     data: '';
     asserts:
     [
-      { [], res: meta::pure::mapping::Result[1]|$res.values->toOne()->toString()->equalJsonStrings('') }
+      { [], res: meta::pure::mapping::Result<Any|*>[1]|$res.values->toOne()->toString()->equalJsonStrings('') }
     ];
   }
 }
