@@ -1,0 +1,31 @@
+---
+'@finos/legend-application-marketplace-deployment': patch
+'@finos/legend-application-marketplace-bootstrap': patch
+'@finos/legend-application-data-cube-deployment': patch
+'@finos/legend-application-data-cube-bootstrap': patch
+'@finos/legend-application-pure-ide-deployment': patch
+'@finos/legend-extension-dsl-data-space-studio': patch
+'@finos/legend-application-studio-deployment': patch
+'@finos/legend-extension-store-service-store': patch
+'@finos/legend-vscode-extension-dependencies': patch
+'@finos/legend-application-query-deployment': patch
+'@finos/legend-application-studio-bootstrap': patch
+'@finos/legend-application-query-bootstrap': patch
+'@finos/legend-application-repl-deployment': patch
+'@finos/legend-extension-dsl-data-product': patch
+'@finos/legend-extension-dsl-data-quality': patch
+'@finos/legend-extension-store-relational': patch
+'@finos/legend-server-showcase-deployment': patch
+'@finos/legend-extension-dsl-persistence': patch
+'@finos/legend-extension-store-flat-data': patch
+'@finos/legend-extension-dsl-data-space': patch
+'@finos/legend-application-marketplace': patch
+'@finos/legend-application-data-cube': patch
+'@finos/legend-extension-dsl-diagram': patch
+'@finos/legend-extension-dsl-service': patch
+'@finos/legend-application-pure-ide': patch
+'@finos/legend-extension-assortment': patch
+'@finos/legend-application-studio': patch
+'@finos/legend-extension-dsl-text': patch
+'@finos/legend-application-query': patch
+---
