@@ -18,10 +18,8 @@ import { action, makeObservable, observable } from 'mobx';
 import type { QueryBuilderState } from '../QueryBuilderState.js';
 import { QueryBuilderGraphFetchTreeState } from './graph-fetch/QueryBuilderGraphFetchTreeState.js';
 import { QueryBuilderTDSState } from './tds/QueryBuilderTDSState.js';
-import {
-  type QueryBuilderExplorerTreeNodeData,
-  QueryBuilderExplorerTreePropertyNodeData,
-} from '../explorer/QueryBuilderExplorerState.js';
+import { type QueryBuilderExplorerTreeNodeData } from '../explorer/QueryBuilderExplorerState.js';
+import { QueryBuilderExplorerTreePropertyNodeData } from '../explorer/QueryBuilderClassExplorerState.js';
 import { Class } from '@finos/legend-graph';
 import { filterByType, UnsupportedOperationError } from '@finos/legend-shared';
 import {

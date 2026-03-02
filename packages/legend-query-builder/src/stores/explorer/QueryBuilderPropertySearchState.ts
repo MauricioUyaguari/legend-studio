@@ -47,15 +47,16 @@ import {
   QUERY_BUILDER_PROPERTY_SEARCH_TYPE,
   QUERY_BUILDER_PROPERTY_SEARCH_MAX_NODES,
 } from '../QueryBuilderConfig.js';
+import { type QueryBuilderExplorerTreeNodeData } from './QueryBuilderExplorerState.js';
 import {
-  type QueryBuilderExplorerTreeNodeData,
   getQueryBuilderPropertyNodeData,
+  QueryBuilderExplorerTreeRootNodeData,
+  cloneQueryBuilderExplorerTreeNodeData,
   getQueryBuilderSubTypeNodeData,
   QueryBuilderExplorerTreePropertyNodeData,
   QueryBuilderExplorerTreeSubTypeNodeData,
-  cloneQueryBuilderExplorerTreeNodeData,
-  QueryBuilderExplorerTreeRootNodeData,
-} from './QueryBuilderExplorerState.js';
+  type QueryBuilderClassExplorerTreeNodeData,
+} from './QueryBuilderClassExplorerState.js';
 import type { QueryBuilderState } from '../QueryBuilderState.js';
 import { QueryBuilderFuzzySearchAdvancedConfigState } from './QueryBuilderFuzzySearchAdvancedConfigState.js';
 import {
@@ -310,9 +311,12 @@ export class QueryBuilderPropertySearchState {
           this.queryBuilderState.explorerState.nonNullableTreeData;
         const rootNodeMap = new Map(
           treeData.rootIds
-            .map((rootId) => treeData.nodes.get(rootId))
+            .map((rootId: string) => treeData.nodes.get(rootId))
             .filter(isNonNullable)
-            .map((rootNode) => [rootNode.id, rootNode]),
+            .map((rootNode: QueryBuilderExplorerTreeNodeData) => [
+              rootNode.id,
+              rootNode,
+            ]),
         );
         this.indexedExplorerTreeNodeMap = new Map();
 
@@ -322,22 +326,26 @@ export class QueryBuilderPropertySearchState {
         // Get all the children of the root node(s)
         Array.from(
           treeData.rootIds
-            .map((rootId) =>
+            .map((rootId: string) =>
               treeData.nodes
                 .get(rootId)
-                ?.childrenIds.map((childId) => treeData.nodes.get(childId)),
+                ?.childrenIds.map((childId: string) =>
+                  treeData.nodes.get(childId),
+                ),
             )
             .flat()
             .filter(isNonNullable)
-            .filter((node) =>
+            .filter((node): node is QueryBuilderExplorerTreeNodeData =>
               node.mappingData.mapped &&
               this.searchConfigurationState.includeSubTypes
                 ? true
                 : node instanceof QueryBuilderExplorerTreePropertyNodeData,
             ),
-        ).forEach((node) => {
+        ).forEach((node: QueryBuilderExplorerTreeNodeData) => {
           if (node.mappingData.mapped && !node.isPartOfDerivedPropertyBranch) {
-            const clonedNode = cloneQueryBuilderExplorerTreeNodeData(node);
+            const clonedNode = cloneQueryBuilderExplorerTreeNodeData(
+              node as QueryBuilderClassExplorerTreeNodeData,
+            );
             currentLevelPropertyNodes.push(clonedNode);
             this.indexedExplorerTreeNodeMap.set(clonedNode.id, clonedNode);
           }

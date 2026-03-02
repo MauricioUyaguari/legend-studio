@@ -36,7 +36,7 @@ import {
   generateExplorerTreePropertyNodeID,
   generateExplorerTreeSubtypeNodeID,
   type QueryBuilderExplorerTreePropertyNodeData,
-} from '../../explorer/QueryBuilderExplorerState.js';
+} from '../../explorer/QueryBuilderClassExplorerState.js';
 import {
   FETCH_STRUCTURE_IMPLEMENTATION,
   QueryBuilderFetchStructureImplementationState,
