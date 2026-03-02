@@ -36,7 +36,7 @@ import {
 import {
   type QueryBuilderExplorerTreePropertyNodeData,
   buildPropertyExpressionFromExplorerTreeNodeData,
-} from '../../../explorer/QueryBuilderExplorerState.js';
+} from '../../explorer/QueryBuilderClassExplorerState.js';
 import {
   getPropertyChainName,
   QueryBuilderPropertyExpressionState,

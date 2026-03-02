@@ -22,7 +22,7 @@ import type {
 } from '@finos/legend-graph';
 import type { Hashable } from '@finos/legend-shared';
 import { computed, makeObservable } from 'mobx';
-import type { QueryBuilderExplorerTreePropertyNodeData } from '../explorer/QueryBuilderExplorerState.js';
+import type { QueryBuilderExplorerTreePropertyNodeData } from '../explorer/QueryBuilderClassExplorerState.js';
 import type { QueryBuilderState } from '../QueryBuilderState.js';
 import type { LambdaFunctionBuilderOption } from '../QueryBuilderValueSpecificationBuilderHelper.js';
 import type { QueryBuilderFetchStructureState } from './QueryBuilderFetchStructureState.js';

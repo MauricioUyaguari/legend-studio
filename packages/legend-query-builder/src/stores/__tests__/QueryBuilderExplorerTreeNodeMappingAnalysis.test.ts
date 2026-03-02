@@ -44,7 +44,7 @@ import {
   generatePropertyNodeMappingData,
   generateSubtypeNodeMappingData,
   type QueryBuilderExplorerTreeNodeMappingData,
-} from '../explorer/QueryBuilderExplorerState.js';
+} from '../explorer/QueryBuilderClassExplorerState.js';
 import { QueryBuilder_GraphManagerPreset } from '../../graph-manager/QueryBuilder_GraphManagerPreset.js';
 import {
   TEST_DATA__MappingData__ComplexM2MModel,

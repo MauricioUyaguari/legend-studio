@@ -34,11 +34,11 @@ import {
   PackageableElementExplicitReference,
   TYPE_CAST_TOKEN,
 } from '@finos/legend-graph';
+import { type QueryBuilderExplorerTreeNodeData } from '../../explorer/QueryBuilderExplorerState.js';
 import {
-  type QueryBuilderExplorerTreeNodeData,
   QueryBuilderExplorerTreePropertyNodeData,
   QueryBuilderExplorerTreeSubTypeNodeData,
-} from '../../explorer/QueryBuilderExplorerState.js';
+} from '../../explorer/QueryBuilderClassExplorerState.js';
 import type { QueryBuilderState } from '../../QueryBuilderState.js';
 import { QUERY_BUILDER_STATE_HASH_STRUCTURE } from '../../QueryBuilderStateHashUtils.js';
 import { computed, makeObservable } from 'mobx';

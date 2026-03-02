@@ -81,13 +81,15 @@ import {
   QueryBuilderSimpleProjectionColumnState,
   type QueryBuilderProjectionColumnState,
 } from './projection/QueryBuilderProjectionColumnState.js';
+import { QueryBuilderRelationColumnProjectionColumnState } from './projection/QueryBuilderRelationColumnProjectionColumnState.js';
+import type { QueryBuilderExplorerTreeRelationColumnNodeData } from '../../explorer/QueryBuilderRelationExplorerState.js';
 import type { QueryBuilderFetchStructureState } from '../QueryBuilderFetchStructureState.js';
 import {
   buildPropertyExpressionFromExplorerTreeNodeData,
   generateExplorerTreePropertyNodeID,
   generateExplorerTreeSubtypeNodeID,
   type QueryBuilderExplorerTreePropertyNodeData,
-} from '../../explorer/QueryBuilderExplorerState.js';
+} from '../../explorer/QueryBuilderClassExplorerState.js';
 import {
   ActionAlertActionType,
   ActionAlertType,
@@ -752,6 +754,21 @@ export class QueryBuilderTDSState
         ),
       );
     });
+  }
+
+  /**
+   * Fetch a relation column from the relation explorer tree.
+   * Creates a QueryBuilderRelationColumnProjectionColumnState.
+   */
+  fetchRelationColumn(
+    node: QueryBuilderExplorerTreeRelationColumnNodeData,
+  ): void {
+    this.addColumn(
+      new QueryBuilderRelationColumnProjectionColumnState(
+        this,
+        node.relationColumn,
+      ),
+    );
   }
 
   checkBeforeClearingColumns(onChange: () => void): void {

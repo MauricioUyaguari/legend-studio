@@ -40,7 +40,8 @@ import {
   QueryBuilderTextEditorMode,
   QueryBuilderTextEditorState,
 } from './QueryBuilderTextEditorState.js';
-import { QueryBuilderExplorerState } from './explorer/QueryBuilderExplorerState.js';
+import type { QueryBuilderExplorerState } from './explorer/QueryBuilderExplorerState.js';
+import { QueryBuilderClassExplorerState } from './explorer/QueryBuilderClassExplorerState.js';
 import { QueryBuilderResultState } from './QueryBuilderResultState.js';
 import {
   processQueryLambdaFunction,
@@ -58,6 +59,7 @@ import {
   type QueryExecutionContext,
   type FunctionAnalysisInfo,
   type GraphData,
+  type RelationType,
   GRAPH_MANAGER_EVENT,
   CompilationError,
   extractSourceInformationCoordinates,
@@ -116,6 +118,7 @@ import type { QueryBuilder_LegendApplicationPlugin_Extension } from './QueryBuil
 import { createDataCubeViewerStateFromQueryBuilder } from './data-cube/QueryBuilderDataCubeHelper.js';
 import type { QueryBuilderDataCubeViewerState } from './data-cube/QueryBuilderDataCubeViewerState.js';
 import { QueryBuilderTelemetryHelper } from '../__lib__/QueryBuilderTelemetryHelper.js';
+import { QueryBuilderRelationExplorerState } from './explorer/QueryBuilderRelationExplorerState.js';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface QueryableSourceInfo {}
@@ -174,6 +177,7 @@ export abstract class QueryBuilderState implements CommandRegistrar {
   lambdaWriteMode = QUERY_BUILDER_LAMBDA_WRITER_MODE.STANDARD;
 
   class?: Class | undefined;
+  relationType?: RelationType | undefined;
   getAllFunction: QUERY_BUILDER_SUPPORTED_GET_ALL_FUNCTIONS =
     QUERY_BUILDER_SUPPORTED_GET_ALL_FUNCTIONS.GET_ALL;
   executionContextState: QueryBuilderExecutionContextState;
@@ -218,6 +222,7 @@ export abstract class QueryBuilderState implements CommandRegistrar {
       changeHistoryState: observable,
       executionContextState: observable,
       class: observable,
+      relationType: observable,
       queryChatState: observable,
       isQueryChatOpened: observable,
       isLocalModeEnabled: observable,
@@ -239,6 +244,7 @@ export abstract class QueryBuilderState implements CommandRegistrar {
       openDataCubeEngine: action,
       setIsCheckingEntitlments: action,
       setClass: action,
+      setRelationType: action,
       setIsQueryChatOpened: action,
       setIsLocalModeEnabled: action,
       setGetAllFunction: action,
@@ -249,6 +255,7 @@ export abstract class QueryBuilderState implements CommandRegistrar {
       resetQueryResult: action,
       resetQueryContent: action,
       changeClass: action,
+      changeRelationType: action,
       changeMapping: action,
       setExecutionContextState: action,
       setQueryChatState: action,
@@ -264,7 +271,7 @@ export abstract class QueryBuilderState implements CommandRegistrar {
       Boolean(config?.enableTypedTDS),
     );
     this.milestoningState = new QueryBuilderMilestoningState(this);
-    this.explorerState = new QueryBuilderExplorerState(this);
+    this.explorerState = new QueryBuilderClassExplorerState(this);
     this.parametersState = new QueryBuilderParametersState(this);
     this.constantState = new QueryBuilderConstantsState(this);
     this.functionsExplorerState = new QueryFunctionsExplorerState(this);
@@ -473,6 +480,18 @@ export abstract class QueryBuilderState implements CommandRegistrar {
 
   setClass(val: Class | undefined): void {
     this.class = val;
+    // Clear relationType when setting class
+    if (val) {
+      this.relationType = undefined;
+    }
+  }
+
+  setRelationType(val: RelationType | undefined): void {
+    this.relationType = val;
+    // Clear class when setting relationType
+    if (val) {
+      this.class = undefined;
+    }
   }
 
   setExecutionContextState(val: QueryBuilderExecutionContextState): void {
@@ -566,11 +585,14 @@ export abstract class QueryBuilderState implements CommandRegistrar {
     this.unsupportedQueryState = new QueryBuilderUnsupportedQueryState(this);
     this.milestoningState = new QueryBuilderMilestoningState(this);
     const mappingModelCoverageAnalysisResult =
-      this.explorerState.mappingModelCoverageAnalysisResult;
-    this.explorerState = new QueryBuilderExplorerState(this);
+      this.explorerState instanceof QueryBuilderClassExplorerState
+        ? this.explorerState.mappingModelCoverageAnalysisResult
+        : undefined;
+    this.explorerState = new QueryBuilderClassExplorerState(this);
     if (mappingModelCoverageAnalysisResult) {
-      this.explorerState.mappingModelCoverageAnalysisResult =
-        mappingModelCoverageAnalysisResult;
+      (
+        this.explorerState as QueryBuilderClassExplorerState
+      ).mappingModelCoverageAnalysisResult = mappingModelCoverageAnalysisResult;
     }
     this.explorerState.refreshTreeData();
     this.constantState = new QueryBuilderConstantsState(this);
@@ -603,6 +625,19 @@ export abstract class QueryBuilderState implements CommandRegistrar {
     this.fetchStructureState.implementation.onClassChange(val);
     this.milestoningState.updateMilestoningConfiguration();
     this.changeHistoryState.cacheNewQuery(this.buildQuery());
+  }
+
+  /**
+   * Change the source to a RelationType.
+   * This disables filter, milestoning, and other Class-specific features.
+   */
+  changeRelationType(val: RelationType): void {
+    this.resetQueryResult();
+    this.resetQueryContent();
+    this.setRelationType(val);
+    // Create the relation explorer state
+    this.explorerState = new QueryBuilderRelationExplorerState(this);
+    this.explorerState.refreshTreeData();
   }
 
   changeMapping(val: Mapping, options?: { keepQueryContent?: boolean }): void {
