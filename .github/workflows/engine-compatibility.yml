@@ -1,0 +1,182 @@
+name: Engine Compatibility
+
+# Runs Studio's engine grammar roundtrip tests against a Legend Engine server image.
+#
+# legend-engine calls this workflow with an image built from the engine PR, so engine
+# changes that break Studio are reported on the engine PR itself. It can also be run
+# manually here against any published engine image.
+on:
+  workflow_call:
+    inputs:
+      engine-image:
+        description: Engine server image to test against
+        type: string
+        default: finos/legend-engine-server-http-server:snapshot
+      engine-image-artifact:
+        description: Name of an artifact from the calling workflow run holding the engine server image as a tarball (e.g. from `jib:buildTar`), loaded before `engine-image` is started
+        type: string
+        default: ''
+      studio-repository:
+        description: legend-studio repository whose tests to run (e.g. a fork carrying the matching Studio change)
+        type: string
+        default: finos/legend-studio
+      studio-ref:
+        description: legend-studio ref whose tests to run
+        type: string
+        default: master
+  workflow_dispatch:
+    inputs:
+      engine-image:
+        description: Engine server image to test against
+        type: string
+        default: finos/legend-engine-server-http-server:snapshot
+
+permissions:
+  contents: read
+
+jobs:
+  grammar-roundtrip:
+    name: Studio Grammar Roundtrip
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ENGINE_IMAGE: ${{ inputs.engine-image }}
+      COMPOSE_FILE: ./fixtures/legend-docker-setup/grammar-test-setup/grammar-test-setup-docker-compose.yml
+      JEST_RESULTS: ${{ github.workspace }}/build/engine-compatibility-results.json
+    steps:
+      - name: Checkout legend-studio
+        uses: actions/checkout@v4.2.2
+        with:
+          # when called from legend-engine, check out legend-studio rather than the caller
+          repository: ${{ github.event_name == 'workflow_dispatch' && github.repository || inputs.studio-repository }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || inputs.studio-ref }}
+      - name: Get legend-studio commit
+        id: studio-commit
+        run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+      - name: Get Yarn cache directory path
+        id: yarn-cache-dir-path
+        run: echo "dir=$(yarn config get cacheFolder)" >> $GITHUB_OUTPUT
+      - name: Setup Yarn cache
+        uses: actions/cache@v4.2.3
+        with:
+          path: ${{ steps.yarn-cache-dir-path.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: ${{ runner.os }}-yarn-
+      - name: Setup Node
+        uses: actions/setup-node@v4.3.0
+        with:
+          node-version: 24
+      - name: Download engine server image
+        if: inputs.engine-image-artifact != ''
+        uses: actions/download-artifact@v4.3.0
+        with:
+          name: ${{ inputs.engine-image-artifact }}
+          path: ${{ runner.temp }}/engine-image
+      - name: Load engine server image
+        if: inputs.engine-image-artifact != ''
+        run: |
+          for image in "$RUNNER_TEMP"/engine-image/*.tar; do
+            docker load --input "$image"
+          done
+      # NOTE: start the engine server in the background so booting it overlaps with
+      # installing dependencies and building; we wait for it right before running the tests
+      - name: Start engine server
+        run: |
+          (
+            code=0
+            docker compose --file="$COMPOSE_FILE" up --detach || code=$?
+            echo "$code" > "$RUNNER_TEMP/engine-up.exit"
+          ) > "$RUNNER_TEMP/engine-up.log" 2>&1 &
+      - name: Install dependencies
+        run: yarn
+      - name: Restore build cache
+        uses: actions/cache/restore@v4.2.3
+        with:
+          path: |
+            packages/*/lib
+            packages/*/build/prod.tsbuildinfo
+          key: ${{ runner.os }}-engine-compatibility-build-${{ hashFiles('yarn.lock') }}-${{ steps.studio-commit.outputs.sha }}
+          restore-keys: ${{ runner.os }}-engine-compatibility-build-${{ hashFiles('yarn.lock') }}-
+      - name: Build
+        run: yarn build:ts
+      - name: Save build cache
+        uses: actions/cache/save@v4.2.3
+        with:
+          path: |
+            packages/*/lib
+            packages/*/build/prod.tsbuildinfo
+          key: ${{ runner.os }}-engine-compatibility-build-${{ hashFiles('yarn.lock') }}-${{ steps.studio-commit.outputs.sha }}
+      - name: Wait for engine server
+        run: |
+          fail() {
+            cat "$RUNNER_TEMP/engine-up.log"
+            docker logs engine || true
+            exit 1
+          }
+          for _ in {1..120}; do
+            if info=$(curl --fail --silent http://127.0.0.1:6300/api/server/v1/info); then
+              commit=$(echo "$info" | jq -r '.info.legendSDLC["git.commit.id"] // "unknown"')
+              echo "Engine image \`$ENGINE_IMAGE\` (commit \`$commit\`)" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            # fail fast if `docker compose up` failed (e.g. image pull failure) or the server died
+            if [[ -f "$RUNNER_TEMP/engine-up.exit" && "$(cat "$RUNNER_TEMP/engine-up.exit")" != '0' ]]; then
+              fail
+            fi
+            if [[ "$(docker inspect --format '{{.State.Status}}' engine 2>/dev/null)" =~ ^(exited|dead)$ ]]; then
+              fail
+            fi
+            sleep 5
+          done
+          fail
+      - name: Run grammar roundtrip tests
+        env:
+          TEST_GROUP: engine-roundtrip
+        run: >-
+          node --max-old-space-size=2048 ./node_modules/jest/bin/jest.js
+          --maxWorkers=2 --json --outputFile="$JEST_RESULTS"
+          packages/legend-manual-tests/src/__tests__/roundtrip-grammar
+      - name: Summarize results
+        if: always()
+        run: |
+          node --input-type=module <<'EOF'
+          import fs from 'fs';
+          const write = (text) => fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${text}\n`);
+          const escapeHtml = (text) =>
+            text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          if (!fs.existsSync(process.env.JEST_RESULTS)) {
+            write('\nThe grammar roundtrip tests did not run; see the job log.');
+            process.exit(0);
+          }
+          const results = JSON.parse(fs.readFileSync(process.env.JEST_RESULTS, 'utf-8'));
+          const failed = results.testResults.flatMap((suite) =>
+            suite.assertionResults.filter((test) => test.status === 'failed'),
+          );
+          if (!failed.length) {
+            write(`\n:white_check_mark: All ${results.numPassedTests} Studio grammar roundtrip tests passed.`);
+            process.exit(0);
+          }
+          write(`\n:x: ${failed.length} of ${results.numTotalTests} Studio grammar roundtrip tests failed.\n`);
+          for (const test of failed) {
+            const message = (test.failureMessages[0] ?? '')
+              .replace(/\u001b\[[0-9;]*m/g, '')
+              .split('\n')
+              .filter((line) => line.trim() && !line.trim().startsWith('at '))
+              .slice(0, 8)
+              .join('\n');
+            write(`<details><summary>${escapeHtml(test.fullName)}</summary>\n\n\`\`\`\n${message}\n\`\`\`\n</details>\n`);
+          }
+          write(
+            [
+              'Each case lives in `packages/legend-manual-tests/src/__tests__/roundtrip-grammar/cases` in [legend-studio](https://github.com/finos/legend-studio);',
+              'see the README there for how the roundtrip works and the known issues.',
+              'If this change to the grammar or protocol is intentional, update the affected cases in a legend-studio PR and link it here.',
+            ].join(' '),
+          );
+          EOF
+      - name: Print engine server logs
+        if: failure()
+        run: docker logs --tail 500 engine || true
+      - name: Shut down engine server
+        if: always()
+        run: docker compose --file="$COMPOSE_FILE" down || true

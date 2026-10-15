@@ -1,0 +1,28 @@
+# TEMPORARY: exercises engine-compatibility.yml the way legend-engine calls it. Not for merge.
+name: TEMP Engine Compatibility Caller
+on:
+  push:
+    branches:
+      - tmp/engine-compat-test
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          docker pull finos/legend-engine-server-http-server:snapshot
+          docker tag finos/legend-engine-server-http-server:snapshot legend-engine-server-http-server:latest
+          docker save legend-engine-server-http-server:latest --output jib-image.tar
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: studio-engine-image
+          path: jib-image.tar
+          retention-days: 1
+          compression-level: 0
+  compat:
+    needs: image
+    uses: ./.github/workflows/engine-compatibility.yml
+    with:
+      engine-image: legend-engine-server-http-server:latest
+      engine-image-artifact: studio-engine-image
+      studio-repository: MauricioUyaguari/legend-studio
+      studio-ref: tmp/engine-compat-test

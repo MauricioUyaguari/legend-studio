@@ -3,7 +3,8 @@ version: '3.8'
 services:
   engine:
     container_name: engine
-    image: finos/legend-engine-server-http-server:snapshot
+    # Set ENGINE_IMAGE to test against another engine build (e.g. one built from an engine PR)
+    image: ${ENGINE_IMAGE:-finos/legend-engine-server-http-server:snapshot}
     entrypoint:
       - /bin/sh
       - -c
