@@ -391,7 +391,18 @@ describe('Backend override service', () => {
     expect(service.getDraft('engine')).toBe('');
 
     service.setDraft('engine', 'not a url');
-    expect(service.getDraftError('engine')).toBe('Invalid URL');
+    expect(service.getDraftError('engine')).toBe(
+      'Invalid URL: use a full http:// or https:// URL',
+    );
+    // a scheme-less address parses as a URL with the scheme `localhost:`
+    service.setDraft('sdlc', 'localhost:6105/api');
+    expect(service.getDraftError('sdlc')).toBe(
+      'Invalid URL: use a full http:// or https:// URL',
+    );
+    service.setDraft('sdlc', 'ftp://localhost:6105/api');
+    expect(service.getDraftError('sdlc')).toBeDefined();
+    service.setDraft('sdlc', 'http://sdlc.test/api');
+    expect(service.getDraftError('sdlc')).toBeUndefined();
     expect(service.hasDraftErrors).toBe(true);
     service.saveAndReload();
     expect(reload).not.toHaveBeenCalled();

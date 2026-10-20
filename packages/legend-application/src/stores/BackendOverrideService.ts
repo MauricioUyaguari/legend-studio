@@ -135,7 +135,14 @@ export class BackendOverrideService {
   /** Why the URL typed for a backend can't be used, if it can't */
   getDraftError(key: string): string | undefined {
     const draft = this.getDraft(key).trim();
-    return draft && !isValidUrl(draft) ? 'Invalid URL' : undefined;
+    if (!draft) {
+      return undefined;
+    }
+    // NOTE: `isValidUrl` alone accepts e.g. `localhost:6100/api`, where
+    // `localhost:` is read as the URL's scheme
+    return isValidUrl(draft) && /^https?:$/u.test(new URL(draft).protocol)
+      ? undefined
+      : 'Invalid URL: use a full http:// or https:// URL';
   }
 
   get hasDraftErrors(): boolean {

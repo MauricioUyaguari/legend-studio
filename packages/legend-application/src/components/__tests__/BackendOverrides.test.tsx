@@ -151,15 +151,19 @@ describe('Backend overrides in the application', () => {
     ).not.toBeNull();
 
     // a URL that isn't one can't be saved
-    fireEvent.change(engineInput, { target: { value: 'not a url' } });
-    expect(screen.getByText('Invalid URL')).not.toBeNull();
+    fireEvent.change(engineInput, { target: { value: 'localhost:6300/api' } });
+    expect(
+      screen.getByText('Invalid URL: use a full http:// or https:// URL'),
+    ).not.toBeNull();
     const save = screen.getByRole('button', { name: 'Save and Reload' });
     expect((save as HTMLButtonElement).disabled).toBe(true);
 
     // reset all clears every field; saving then removes the overrides
     fireEvent.click(screen.getByRole('button', { name: 'Reset All' }));
     expect((sdlcInput as HTMLInputElement).value).toBe('');
-    expect(screen.queryByText('Invalid URL')).toBeNull();
+    expect(
+      screen.queryByText('Invalid URL: use a full http:// or https:// URL'),
+    ).toBeNull();
     const reload = jest.fn();
     applicationStore.navigationService.navigator.reload = reload;
     fireEvent.click(screen.getByRole('button', { name: 'Save and Reload' }));
