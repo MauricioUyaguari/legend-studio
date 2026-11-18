@@ -21,4 +21,6 @@ export enum LegendDataCubeSettingStorageKey {
 export enum LegendDataCubeSettingKey {
   DEBUGGER__ENGINE_SERVER_CLIENT__ENABLE_COMPRESSION = 'debugger.engineServerClient.enableCompression',
   DEBUGGER__ENGINE_SERVER_CLIENT__BASE_URL = 'debugger.engineServerClient.baseUrl',
+  DEBUGGER__PLANNER__LEGEND_LITE__ENABLED = 'debugger.planner.legendLite.enabled',
+  DEBUGGER__PLANNER__LEGEND_LITE__SHADOW = 'debugger.planner.legendLite.shadow',
 }

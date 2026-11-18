@@ -142,6 +142,19 @@ import {
 } from '@finos/legend-shared';
 import type { LegendDataCubeApplicationStore } from './LegendDataCubeBaseStore.js';
 import { LegendDataCubeDuckDBEngine } from './LegendDataCubeDuckDBEngine.js';
+import { LegendLitePlannerClient } from './planner/LegendLitePlannerClient.js';
+import {
+  LEGEND_LITE_PLANNER_SHADOW_OUTCOME,
+  LegendLitePlannerShadow,
+  type LegendLitePlannerShadowDetail,
+  type LegendLitePlannerShadowRecord,
+} from './planner/LegendLitePlannerShadow.js';
+import {
+  chooseDuckDBPlanner,
+  generateExecutionPlanWithLegendLite,
+  LEGEND_DATA_CUBE_PLANNER,
+  LEGEND_DATA_CUBE_PLANNER_MODE,
+} from './planner/LegendLitePlannerRequest.js';
 import {
   getCacheColumnType,
   getRelationalDataTypeFromDuckDBType,
@@ -196,6 +209,7 @@ import {
   EXTERNAL_APPLICATION_NAVIGATION__generateLakehouseViewUrl,
 } from '../__lib__/LegendDataCubeNavigation.js';
 import { LEGEND_DATA_CUBE_DOCUMENTATION_KEY } from '../__lib__/LegendDataCubeDocumentation.js';
+import { LEGEND_DATACUBE_APP_EVENT } from '../__lib__/LegendDataCubeEvent.js';
 
 // NOTE: only the precise primitives which exist in the engine are listed, some members of
 // PRECISE_PRIMITIVE_TYPE (e.g. relational TIMESTAMP, Date, Time, Decimal) are not precise primitives.
@@ -236,6 +250,22 @@ const normalizeIngestColumnTypePath = (
     : undefined;
 };
 
+const PLANNER_SHADOW_EVENT: Record<
+  LEGEND_LITE_PLANNER_SHADOW_OUTCOME,
+  LEGEND_DATACUBE_APP_EVENT
+> = {
+  [LEGEND_LITE_PLANNER_SHADOW_OUTCOME.MATCH]:
+    LEGEND_DATACUBE_APP_EVENT.PLANNER_SHADOW__MATCH,
+  [LEGEND_LITE_PLANNER_SHADOW_OUTCOME.DIFFERENT]:
+    LEGEND_DATACUBE_APP_EVENT.PLANNER_SHADOW__DIFFERENCE,
+  [LEGEND_LITE_PLANNER_SHADOW_OUTCOME.INCONCLUSIVE]:
+    LEGEND_DATACUBE_APP_EVENT.PLANNER_SHADOW__INCONCLUSIVE,
+  [LEGEND_LITE_PLANNER_SHADOW_OUTCOME.REFUSED]:
+    LEGEND_DATACUBE_APP_EVENT.PLANNER_SHADOW__REFUSAL,
+  [LEGEND_LITE_PLANNER_SHADOW_OUTCOME.FAILED]:
+    LEGEND_DATACUBE_APP_EVENT.PLANNER_SHADOW__FAILURE,
+};
+
 export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
   private readonly _application: LegendDataCubeApplicationStore;
   private readonly _depotServerClient: DepotServerClient;
@@ -244,6 +274,9 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
   private readonly _lakehouseIngestServerClient: LakehouseIngestServerClient;
   private readonly _graphManager: V1_PureGraphManager;
   private readonly _duckDBEngine: LegendDataCubeDuckDBEngine;
+  private _plannerMode = LEGEND_DATA_CUBE_PLANNER_MODE.ENGINE;
+  private _legendLitePlannerClient?: LegendLitePlannerClient | undefined;
+  private readonly _legendLitePlannerShadow = new LegendLitePlannerShadow();
   private _secondaryOauthClient?: SecondaryOAuthClient;
   private LAKEHOUSE_SECTION = '###Lakehouse';
 
@@ -289,7 +322,29 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
   }
 
   async dispose() {
+    this._legendLitePlannerClient?.dispose();
+    this._legendLitePlannerClient = undefined;
     await this._duckDBEngine.dispose();
+  }
+
+  /**
+   * Sets how the SQL of queries on DuckDB-backed sources is generated; takes effect from the next query.
+   */
+  setPlannerMode(mode: LEGEND_DATA_CUBE_PLANNER_MODE) {
+    this._plannerMode = mode;
+  }
+
+  private _getLegendLitePlannerClient() {
+    if (!this._legendLitePlannerClient) {
+      // NOTE: the module that knows where the planner is gets loaded here, on first use, and nowhere
+      // else, so that nothing of the planner is fetched unless the planner is used
+      this._legendLitePlannerClient = new LegendLitePlannerClient(async () =>
+        (
+          await import('./planner/LegendLitePlannerAssets.js')
+        ).createLegendLitePlannerConnection(),
+      );
+    }
+    return this._legendLitePlannerClient;
   }
 
   // ---------------------------------- IMPLEMENTATION ----------------------------------
@@ -1175,91 +1230,18 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
           filteredParameterValues,
           options,
         );
-      } else if (source instanceof CachedDataCubeSource) {
-        // get the execute plan to extract the generated SQL to run against cached DB
-        const executionPlan = await this._generateExecutionPlan(
-          query,
-          source.model,
-          [],
-          // NOTE: for caching, we're using DuckDB, but its protocol models
-          // are not available in the latest production protocol version V1_33_0, so
-          // we have to force using VX_X_X
-          // once we either cut another protocol version or backport the DuckDB models
-          // to V1_33_0, we will can remove this
-          { ...options, clientVersion: PureClientVersion.VX_X_X },
-        );
-        const sql = guaranteeNonNullable(
-          executionPlan instanceof V1_SimpleExecutionPlan
-            ? executionPlan.rootExecutionNode.executionNodes
-                .filter(filterByType(V1_SQLExecutionNode))
-                .at(-1)?.sqlQuery
-            : undefined,
-          `Can't process execution plan: failed to extract generated SQL`,
-        );
-        const endTime = performance.now();
-        return {
-          executedQuery: await queryCodePromise,
-          executedSQL: sql,
-          result: await this._duckDBEngine.runSQLQuery(sql),
-          executionTime: endTime - startTime,
-        };
-      } else if (source instanceof LocalFileDataCubeSource) {
-        // get the execute plan to extract the generated SQL to run against cached DB
-        const executionPlan = await this._generateExecutionPlan(
-          query,
-          source.model,
-          [],
-          // NOTE: for local file, we're using DuckDB, but its protocol models
-          // are not available in the latest production protocol version V1_33_0, so
-          // we have to force using VX_X_X
-          // once we either cut another protocol version or backport the DuckDB models
-          // to V1_33_0, we will can remove this
-          { ...options, clientVersion: PureClientVersion.VX_X_X },
-        );
-        const sql = guaranteeNonNullable(
-          executionPlan instanceof V1_SimpleExecutionPlan
-            ? executionPlan.rootExecutionNode.executionNodes
-                .filter(filterByType(V1_SQLExecutionNode))
-                .at(-1)?.sqlQuery
-            : undefined,
-          `Can't process execution plan: failed to extract generated SQL`,
-        );
-        const endTime = performance.now();
-        return {
-          executedQuery: await queryCodePromise,
-          executedSQL: sql,
-          result: await this._duckDBEngine.runSQLQuery(sql),
-          executionTime: endTime - startTime,
-        };
       } else if (
+        source instanceof CachedDataCubeSource ||
+        source instanceof LocalFileDataCubeSource ||
         source instanceof LakehouseProducerIcebergCachedDataCubeSource
       ) {
-        const executionPlan = await this._generateExecutionPlan(
+        return await this._executeQueryOnDuckDB(
           query,
           source.model,
-          [],
-          // NOTE: for local file, we're using DuckDB, but its protocol models
-          // are not available in the latest production protocol version V1_33_0, so
-          // we have to force using VX_X_X
-          // once we either cut another protocol version or backport the DuckDB models
-          // to V1_33_0, we will can remove this
-          { ...options, clientVersion: PureClientVersion.VX_X_X },
+          options,
+          queryCodePromise,
+          startTime,
         );
-        const sql = guaranteeNonNullable(
-          executionPlan instanceof V1_SimpleExecutionPlan
-            ? executionPlan.rootExecutionNode.executionNodes
-                .filter(filterByType(V1_SQLExecutionNode))
-                .at(-1)?.sqlQuery
-            : undefined,
-          `Can't process execution plan: failed to extract generated SQL`,
-        );
-        const endTime = performance.now();
-        return {
-          executedQuery: await queryCodePromise,
-          executedSQL: sql,
-          result: await this._duckDBEngine.runSQLQuery(sql),
-          executionTime: endTime - startTime,
-        };
       } else {
         throw new UnsupportedOperationError(
           `Can't execute query with unsupported source`,
@@ -1810,13 +1792,137 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
     }
   }
 
+  /**
+   * Executes a query on a DuckDB-backed source (i.e. a cached source, a local file, a cached Iceberg table):
+   * we get the execution plan only to extract the generated SQL, which we then run against our own DuckDB.
+   */
+  private async _executeQueryOnDuckDB(
+    query: V1_Lambda,
+    model: PlainObject<V1_PureModelContext>,
+    options: DataCubeExecutionOptions | undefined,
+    queryCodePromise: Promise<string>,
+    startTime: number,
+  ) {
+    // NOTE: we're using DuckDB, but its protocol models are not available in
+    // the latest production protocol version V1_33_0, so we have to force using VX_X_X
+    // once we either cut another protocol version or backport the DuckDB models
+    // to V1_33_0, we will can remove this
+    const planOptions = { ...options, clientVersion: PureClientVersion.VX_X_X };
+    const serializedQuery = this.serializeValueSpecification(query);
+    const sql = this._extractSQLFromExecutionPlan(
+      await this._generateExecutionPlan(
+        query,
+        model,
+        [],
+        planOptions,
+        chooseDuckDBPlanner(this._plannerMode, serializedQuery),
+      ),
+    );
+    const endTime = performance.now();
+    const executedQuery = await queryCodePromise;
+    const result = await this._duckDBEngine.runSQLQuery(sql);
+
+    if (this._plannerMode === LEGEND_DATA_CUBE_PLANNER_MODE.SHADOW) {
+      // NOTE: this is deliberately not awaited: the user has their result, and what follows compares
+      // it with legend-lite's planner in the background. It never throws.
+      this._legendLitePlannerShadow
+        .run({
+          query: serializedQuery,
+          engine: { sql, result },
+          generatePlannerSQL: async () =>
+            this._extractSQLFromExecutionPlan(
+              V1_deserializeExecutionPlan(
+                await generateExecutionPlanWithLegendLite(
+                  this._getLegendLitePlannerClient(),
+                  this._buildGeneratePlanInput(query, model, [], planOptions),
+                ),
+              ),
+            ),
+          runSQL: (plannerSQL) => this._duckDBEngine.runSQLQuery(plannerSQL),
+          record: (record, detail) =>
+            this._recordPlannerShadow(record, detail, executedQuery),
+        })
+        .catch(() => {});
+    }
+
+    return {
+      executedQuery,
+      executedSQL: sql,
+      result,
+      executionTime: endTime - startTime,
+    };
+  }
+
+  private _extractSQLFromExecutionPlan(executionPlan: V1_ExecutionPlan) {
+    return guaranteeNonNullable(
+      executionPlan instanceof V1_SimpleExecutionPlan
+        ? executionPlan.rootExecutionNode.executionNodes
+            .filter(filterByType(V1_SQLExecutionNode))
+            .at(-1)?.sqlQuery
+        : undefined,
+      `Can't process execution plan: failed to extract generated SQL`,
+    );
+  }
+
+  private _recordPlannerShadow(
+    record: LegendLitePlannerShadowRecord,
+    detail: LegendLitePlannerShadowDetail,
+    queryCode: string,
+  ) {
+    // NOTE: the query and the SQL texts carry column names and filter values, so they are only
+    // logged here, in the browser; what is sent as telemetry holds counts, timings and messages
+    this.debugProcess(
+      `Planner Shadow`,
+      ['OUTCOME', record.outcome],
+      ['RECORD', record],
+      ['QUERY', queryCode],
+      ['ENGINE SQL', detail.engineSQL],
+      ['PLANNER SQL', detail.plannerSQL],
+    );
+    try {
+      this.sendTelemetry(PLANNER_SHADOW_EVENT[record.outcome], record);
+    } catch {
+      // ignore telemetry failure
+    }
+  }
+
   private async _generateExecutionPlan(
     query: V1_Lambda,
     model: PlainObject<V1_PureModelContext>,
     parameterValues?: V1_ParameterValue[] | undefined,
     options?: DataCubeExecutionOptions | undefined,
+    planner = LEGEND_DATA_CUBE_PLANNER.ENGINE,
   ): Promise<V1_ExecutionPlan> {
-    const input = {
+    const input = this._buildGeneratePlanInput(
+      query,
+      model,
+      parameterValues,
+      options,
+    );
+    try {
+      return V1_deserializeExecutionPlan(
+        planner === LEGEND_DATA_CUBE_PLANNER.LEGEND_LITE
+          ? await generateExecutionPlanWithLegendLite(
+              this._getLegendLitePlannerClient(),
+              input,
+            )
+          : await this._engineServerClient.generatePlan(input),
+      );
+    } catch (err) {
+      assertErrorThrown(err);
+      const error = new DataCubeExecutionError(err.message);
+      error.executeInput = input;
+      throw error;
+    }
+  }
+
+  private _buildGeneratePlanInput(
+    query: V1_Lambda,
+    model: PlainObject<V1_PureModelContext>,
+    parameterValues?: V1_ParameterValue[] | undefined,
+    options?: DataCubeExecutionOptions | undefined,
+  ) {
+    return {
       clientVersion:
         options?.clientVersion ??
         // eslint-disable-next-line no-process-env
@@ -1833,16 +1939,6 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
         serialize(V1_parameterValueModelSchema, parameterValue),
       ),
     };
-    try {
-      return V1_deserializeExecutionPlan(
-        await this._engineServerClient.generatePlan(input),
-      );
-    } catch (err) {
-      assertErrorThrown(err);
-      const error = new DataCubeExecutionError(err.message);
-      error.executeInput = input;
-      throw error;
-    }
   }
 
   async ingestLocalFileData(data: string, format: string, refId?: string) {

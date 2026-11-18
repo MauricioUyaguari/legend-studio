@@ -55,6 +55,7 @@ import {
   LegendDataCubeSettingKey,
   LegendDataCubeSettingStorageKey,
 } from '../__lib__/LegendDataCubeSetting.js';
+import { resolvePlannerMode } from './planner/LegendLitePlannerRequest.js';
 
 declare const AG_GRID_LICENSE: string | undefined;
 
@@ -79,6 +80,8 @@ export class LegendDataCubeBaseStore {
   readonly layoutService: DataCubeLayoutService;
   readonly alertService: DataCubeAlertService;
   readonly settings: DataCubeSetting[];
+  private _isPlannerLegendLiteEnabled = false;
+  private _isPlannerShadowEnabled = false;
 
   readonly initializeState = ActionState.create();
 
@@ -145,6 +148,30 @@ export class LegendDataCubeBaseStore {
           this.graphManager.TEMPORARY__getEngineConfig().setBaseUrl(newValue);
         },
       } satisfies DataCubeSetting<string>,
+      {
+        key: LegendDataCubeSettingKey.DEBUGGER__PLANNER__LEGEND_LITE__ENABLED,
+        title: `Planner: Use legend-lite for Cached and Local Sources (Experimental)`,
+        description: `Generates the SQL for cached sources, local files and cached Iceberg tables in the browser, with legend-lite's planner, instead of asking the engine server. A query the planner does not support fails with the planner's message; it is not retried on the engine server.`,
+        group: DataCubeSettingGroup.DEBUG,
+        type: DataCubeSettingType.BOOLEAN,
+        defaultValue: false,
+        action: (api, newValue) => {
+          this._isPlannerLegendLiteEnabled = newValue;
+          this.applyPlannerMode();
+        },
+      } satisfies DataCubeSetting<boolean>,
+      {
+        key: LegendDataCubeSettingKey.DEBUGGER__PLANNER__LEGEND_LITE__SHADOW,
+        title: `Planner: Compare legend-lite with the Engine in the Background (Experimental)`,
+        description: `Keeps generating the SQL for cached sources, local files and cached Iceberg tables with the engine server, and afterwards, in the background, also generates it with legend-lite's planner, runs it, and records whether the two results are the same. This has no effect when legend-lite is used (the setting above).`,
+        group: DataCubeSettingGroup.DEBUG,
+        type: DataCubeSettingType.BOOLEAN,
+        defaultValue: false,
+        action: (api, newValue) => {
+          this._isPlannerShadowEnabled = newValue;
+          this.applyPlannerMode();
+        },
+      } satisfies DataCubeSetting<boolean>,
     ];
 
     this.remoteEngine = new V1_RemoteEngine(
@@ -168,6 +195,13 @@ export class LegendDataCubeBaseStore {
       this.lakehouseIngestServerClient,
       this.graphManager,
     );
+    this._isPlannerLegendLiteEnabled = this.getBooleanSettingValue(
+      LegendDataCubeSettingKey.DEBUGGER__PLANNER__LEGEND_LITE__ENABLED,
+    );
+    this._isPlannerShadowEnabled = this.getBooleanSettingValue(
+      LegendDataCubeSettingKey.DEBUGGER__PLANNER__LEGEND_LITE__SHADOW,
+    );
+    this.applyPlannerMode();
     this.taskService = new DataCubeTaskService();
     this.layoutService = new DataCubeLayoutService();
     this.alertService = new DataCubeAlertService(
@@ -190,6 +224,26 @@ export class LegendDataCubeBaseStore {
             configuration.key ===
             LegendDataCubeSettingKey.DEBUGGER__ENGINE_SERVER_CLIENT__ENABLE_COMPRESSION,
         )?.defaultValue,
+    );
+  }
+
+  private applyPlannerMode() {
+    this.engine.setPlannerMode(
+      resolvePlannerMode(
+        this._isPlannerLegendLiteEnabled,
+        this._isPlannerShadowEnabled,
+      ),
+    );
+  }
+
+  private getBooleanSettingValue(key: LegendDataCubeSettingKey) {
+    const persistedValues = this.application.settingService.getObjectValue(
+      LegendDataCubeSettingStorageKey.DATA_CUBE,
+    ) as DataCubeSettingValues | undefined;
+    return guaranteeIsBoolean(
+      persistedValues?.[key] ??
+        this.settings.find((configuration) => configuration.key === key)
+          ?.defaultValue,
     );
   }
 
