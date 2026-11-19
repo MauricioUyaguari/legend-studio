@@ -20,11 +20,11 @@ import {
   type TDSExecutionResult,
 } from '@finos/legend-graph';
 import { isPlainObject, isString } from '@finos/legend-shared';
-import { LegendLitePlannerError } from './LegendLitePlannerClient.js';
 import {
-  hasCastlessPivot,
-  LEGEND_LITE_PLANNER_REQUEST_ERROR_KIND,
-} from './LegendLitePlannerRequest.js';
+  LEGEND_LITE_ENGINE_ERROR_KIND,
+  LegendLiteEngineError,
+} from './LegendLiteEngineTransport.js';
+import { hasCastlessPivot } from './LegendDataCubePlannerMode.js';
 
 /**
  * Shadow mode: the engine plans every query, as usual, and its result is what the user sees. Afterwards,
@@ -478,8 +478,8 @@ export class LegendLitePlannerShadow {
       plannerSQL = await run.generatePlannerSQL();
     } catch (error) {
       const isRefusal =
-        error instanceof LegendLitePlannerError &&
-        error.kind === LEGEND_LITE_PLANNER_REQUEST_ERROR_KIND.REFUSAL;
+        error instanceof LegendLiteEngineError &&
+        error.kind === LEGEND_LITE_ENGINE_ERROR_KIND.REFUSAL;
       return {
         outcome: isRefusal
           ? LEGEND_LITE_PLANNER_SHADOW_OUTCOME.REFUSED

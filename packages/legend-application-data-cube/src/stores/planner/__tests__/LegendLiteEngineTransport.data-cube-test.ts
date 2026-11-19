@@ -17,28 +17,28 @@
 import { unitTest } from '@finos/legend-shared/test';
 import { describe, expect, test } from '@jest/globals';
 import {
-  LEGEND_LITE_PLANNER_ERROR_KIND,
-  LegendLitePlannerClient,
-  LegendLitePlannerError,
-  unfoldLegendLitePlannerAnswer,
-  type LegendLitePlannerConnection,
-  type LegendLitePlannerRequest,
-  type LegendLitePlannerResponse,
-} from '../LegendLitePlannerClient.js';
+  LEGEND_LITE_ENGINE_ERROR_KIND,
+  LegendLiteEngineTransport,
+  LegendLiteEngineError,
+  unfoldLegendLiteEngineAnswer,
+  type LegendLiteEngineConnection,
+  type LegendLiteEngineRequest,
+  type LegendLiteEngineResponse,
+} from '../LegendLiteEngineTransport.js';
 
-/** A worker that answers only when the test tells it to. */
-class TEST__PlannerPort {
-  readonly requests: LegendLitePlannerRequest[] = [];
+/** What stands for the worker: it answers only when the test tells it to. */
+class TEST__EnginePort {
+  readonly requests: LegendLiteEngineRequest[] = [];
   closed = false;
-  private _onResponse?: (response: LegendLitePlannerResponse) => void;
+  private _onResponse?: (response: LegendLiteEngineResponse) => void;
   private _onFailure?: (message: string) => void;
 
-  send(request: LegendLitePlannerRequest): void {
+  send(request: LegendLiteEngineRequest): void {
     this.requests.push(request);
   }
 
   listen(
-    onResponse: (response: LegendLitePlannerResponse) => void,
+    onResponse: (response: LegendLiteEngineResponse) => void,
     onFailure: (message: string) => void,
   ): void {
     this._onResponse = onResponse;
@@ -49,7 +49,7 @@ class TEST__PlannerPort {
     this.closed = true;
   }
 
-  respond(response: LegendLitePlannerResponse): void {
+  respond(response: LegendLiteEngineResponse): void {
     this._onResponse?.(response);
   }
 
@@ -59,10 +59,10 @@ class TEST__PlannerPort {
 }
 
 const TEST__setup = () => {
-  const ports: TEST__PlannerPort[] = [];
-  const client = new LegendLitePlannerClient(
-    async (): Promise<LegendLitePlannerConnection> => {
-      const port = new TEST__PlannerPort();
+  const ports: TEST__EnginePort[] = [];
+  const client = new LegendLiteEngineTransport(
+    async (): Promise<LegendLiteEngineConnection> => {
+      const port = new TEST__EnginePort();
       ports.push(port);
       return {
         port,
@@ -82,9 +82,9 @@ const TEST__flush = async (): Promise<void> => {
 };
 
 const TEST__getPort = (
-  ports: TEST__PlannerPort[],
+  ports: TEST__EnginePort[],
   index = 0,
-): TEST__PlannerPort => {
+): TEST__EnginePort => {
   const port = ports[index];
   if (!port) {
     throw new Error(`No worker was created at index ${index}`);
@@ -93,9 +93,9 @@ const TEST__getPort = (
 };
 
 const TEST__getRequest = (
-  port: TEST__PlannerPort,
+  port: TEST__EnginePort,
   index = 0,
-): LegendLitePlannerRequest => {
+): LegendLiteEngineRequest => {
   const request = port.requests[index];
   if (!request) {
     throw new Error(`No request was sent at index ${index}`);
@@ -103,10 +103,10 @@ const TEST__getRequest = (
   return request;
 };
 
-describe(unitTest('legend-lite planner answer'), () => {
+describe(unitTest('legend-lite engine transport: answer'), () => {
   test('an answered route gives its status, content type and body', () => {
     expect(
-      unfoldLegendLitePlannerAnswer('OK\n200\napplication/json\n{"a":1}'),
+      unfoldLegendLiteEngineAnswer('OK\n200\napplication/json\n{"a":1}'),
     ).toEqual({
       status: 200,
       contentType: 'application/json',
@@ -116,13 +116,13 @@ describe(unitTest('legend-lite planner answer'), () => {
 
   test('a body keeps its own line breaks', () => {
     expect(
-      unfoldLegendLitePlannerAnswer('OK\n200\ntext/plain\nline 1\nline 2\n')
+      unfoldLegendLiteEngineAnswer('OK\n200\ntext/plain\nline 1\nline 2\n')
         .body,
     ).toBe('line 1\nline 2\n');
   });
 
   test('a body may be empty', () => {
-    expect(unfoldLegendLitePlannerAnswer('OK\n204\ntext/plain\n')).toEqual({
+    expect(unfoldLegendLiteEngineAnswer('OK\n204\ntext/plain\n')).toEqual({
       status: 204,
       contentType: 'text/plain',
       body: '',
@@ -131,23 +131,23 @@ describe(unitTest('legend-lite planner answer'), () => {
 
   test('a route that refuses is an answer, not an error', () => {
     expect(
-      unfoldLegendLitePlannerAnswer(
+      unfoldLegendLiteEngineAnswer(
         'OK\n500\napplication/json\n{"message":"refused"}',
       ).status,
     ).toBe(500);
   });
 
-  test('a failed call throws with the kind and the message the planner gave', () => {
+  test('a failed call throws with the kind and the message legend-lite gave', () => {
     let thrown: unknown;
     try {
-      unfoldLegendLitePlannerAnswer('ERR\ninternal\nline 1\nline 2');
+      unfoldLegendLiteEngineAnswer('ERR\ninternal\nline 1\nline 2');
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(LegendLitePlannerError);
-    expect((thrown as LegendLitePlannerError).kind).toBe('internal');
-    expect((thrown as LegendLitePlannerError).message).toBe(
-      '[legend-lite planner] line 1\nline 2',
+    expect(thrown).toBeInstanceOf(LegendLiteEngineError);
+    expect((thrown as LegendLiteEngineError).kind).toBe('internal');
+    expect((thrown as LegendLiteEngineError).message).toBe(
+      '[legend-lite] line 1\nline 2',
     );
   });
 
@@ -160,18 +160,18 @@ describe(unitTest('legend-lite planner answer'), () => {
   ])('an answer with %s is refused', (_, raw) => {
     let thrown: unknown;
     try {
-      unfoldLegendLitePlannerAnswer(raw);
+      unfoldLegendLiteEngineAnswer(raw);
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(LegendLitePlannerError);
-    expect((thrown as LegendLitePlannerError).kind).toBe(
-      LEGEND_LITE_PLANNER_ERROR_KIND.MALFORMED_ANSWER,
+    expect(thrown).toBeInstanceOf(LegendLiteEngineError);
+    expect((thrown as LegendLiteEngineError).kind).toBe(
+      LEGEND_LITE_ENGINE_ERROR_KIND.MALFORMED_ANSWER,
     );
   });
 });
 
-describe(unitTest('legend-lite planner client'), () => {
+describe(unitTest('legend-lite engine transport: requests'), () => {
   test('no worker is created until the first request', async () => {
     const { client, ports } = TEST__setup();
     await TEST__flush();
@@ -190,7 +190,7 @@ describe(unitTest('legend-lite planner client'), () => {
     await answer;
   });
 
-  test('a request carries the route and where the planner is', async () => {
+  test('a request carries the route and where the module is', async () => {
     const { client, ports } = TEST__setup();
     const answer = client.pureV1(
       '/api/pure/v1/execution/generatePlan',
@@ -275,8 +275,8 @@ describe(unitTest('legend-lite planner client'), () => {
       error: 'could not load',
     });
     await expect(failed).rejects.toMatchObject({
-      kind: LEGEND_LITE_PLANNER_ERROR_KIND.WORKER,
-      message: '[legend-lite planner] could not load',
+      kind: LEGEND_LITE_ENGINE_ERROR_KIND.WORKER,
+      message: '[legend-lite] could not load',
     });
 
     const next = client.pureV1('/b', '', '');
@@ -299,9 +299,9 @@ describe(unitTest('legend-lite planner client'), () => {
     const port = TEST__getPort(ports);
     port.fail('script error');
     await expect(first).rejects.toMatchObject({
-      kind: LEGEND_LITE_PLANNER_ERROR_KIND.WORKER,
+      kind: LEGEND_LITE_ENGINE_ERROR_KIND.WORKER,
     });
-    await expect(second).rejects.toBeInstanceOf(LegendLitePlannerError);
+    await expect(second).rejects.toBeInstanceOf(LegendLiteEngineError);
     expect(port.closed).toBe(true);
 
     const next = client.pureV1('/next', '', '');
@@ -318,8 +318,8 @@ describe(unitTest('legend-lite planner client'), () => {
 
   test('a worker that cannot be created fails the request, and the next request tries again', async () => {
     let attempts = 0;
-    const port = new TEST__PlannerPort();
-    const client = new LegendLitePlannerClient(async () => {
+    const port = new TEST__EnginePort();
+    const client = new LegendLiteEngineTransport(async () => {
       attempts++;
       if (attempts === 1) {
         throw new Error('no worker');
@@ -346,7 +346,7 @@ describe(unitTest('legend-lite planner client'), () => {
     await TEST__flush();
 
     client.dispose();
-    await expect(waiting).rejects.toBeInstanceOf(LegendLitePlannerError);
+    await expect(waiting).rejects.toBeInstanceOf(LegendLiteEngineError);
     await TEST__flush();
     expect(TEST__getPort(ports).closed).toBe(true);
   });

@@ -15,23 +15,23 @@
  */
 
 /**
- * Where legend-lite's planner is, and the worker that holds it.
+ * Where legend-lite's engine module is, and the worker that holds it.
  *
- * IMPORTANT: this is the only file that refers to the planner's files, and it must only ever be loaded
- * by a dynamic `import()`, so that nothing of the planner is fetched (and none of it is required at
- * build time by an application that does not reach this file) unless the planner is used.
+ * IMPORTANT: this is the only file that refers to the module's files, and it must only ever be loaded
+ * by a dynamic `import()`, so that nothing of the module is fetched (and none of it is required at
+ * build time by an application that does not reach this file) unless legend-lite is used.
  */
 
-import plannerModule from '@legend-lite/planner-wasm/classes.wasm';
+import engineModule from '@legend-lite/planner-wasm/classes.wasm';
 import type {
-  LegendLitePlannerConnection,
-  LegendLitePlannerResponse,
-} from './LegendLitePlannerClient.js';
+  LegendLiteEngineConnection,
+  LegendLiteEngineResponse,
+} from './LegendLiteEngineTransport.js';
 
 // NOTE: each URL is created on its own, as we do for DuckDB's worker: written as
 // `new Worker(new URL(...))`, the bundler would bundle the worker's script instead of emitting the file
 const WORKER_URL = new URL(
-  './LegendLitePlanner.worker.js',
+  './LegendLiteEngine.worker.js',
   import.meta.url,
 ).toString();
 const RUNTIME_URL = new URL(
@@ -39,21 +39,21 @@ const RUNTIME_URL = new URL(
   import.meta.url,
 ).toString();
 
-export const createLegendLitePlannerConnection =
-  (): LegendLitePlannerConnection => {
+export const createLegendLiteEngineConnection =
+  (): LegendLiteEngineConnection => {
     const worker = new Worker(WORKER_URL, { type: 'module' });
     return {
       port: {
         send: (request) => worker.postMessage(request),
         listen: (onResponse, onFailure) => {
           worker.onmessage = (event) =>
-            onResponse(event.data as LegendLitePlannerResponse);
+            onResponse(event.data as LegendLiteEngineResponse);
           worker.onerror = (event) => onFailure(event.message);
         },
         close: () => worker.terminate(),
       },
       runtimeUrl: RUNTIME_URL,
       // absolute, since the worker would resolve a relative URL against its own
-      moduleUrl: new URL(plannerModule as string, document.baseURI).toString(),
+      moduleUrl: new URL(engineModule as string, document.baseURI).toString(),
     };
   };

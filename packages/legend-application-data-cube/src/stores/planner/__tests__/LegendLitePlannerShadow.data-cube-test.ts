@@ -22,12 +22,10 @@ import {
   TDSExecutionResult,
   TDSRow,
 } from '@finos/legend-graph';
-import { LegendLitePlannerError } from '../LegendLitePlannerClient.js';
 import {
-  LEGEND_DATA_CUBE_PLANNER_MODE,
-  LEGEND_LITE_PLANNER_REQUEST_ERROR_KIND,
-  resolvePlannerMode,
-} from '../LegendLitePlannerRequest.js';
+  LEGEND_LITE_ENGINE_ERROR_KIND,
+  LegendLiteEngineError,
+} from '../LegendLiteEngineTransport.js';
 import {
   compareShadowResults,
   getQueryLimit,
@@ -516,8 +514,8 @@ describe(unitTest('legend-lite planner shadow: run'), () => {
   test('a refusal is recorded with the message of the planner, and no SQL is run', async () => {
     const { run, records, executed } = TEST__setup({
       generatePlannerSQL: async () => {
-        throw new LegendLitePlannerError(
-          LEGEND_LITE_PLANNER_REQUEST_ERROR_KIND.REFUSAL,
+        throw new LegendLiteEngineError(
+          LEGEND_LITE_ENGINE_ERROR_KIND.REFUSAL,
           'no row scope',
         );
       },
@@ -527,8 +525,8 @@ describe(unitTest('legend-lite planner shadow: run'), () => {
     expect(executed).toHaveLength(0);
     expect(records[0]?.record).toMatchObject({
       outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.REFUSED,
-      kind: LEGEND_LITE_PLANNER_REQUEST_ERROR_KIND.REFUSAL,
-      message: '[legend-lite planner] no row scope',
+      kind: LEGEND_LITE_ENGINE_ERROR_KIND.REFUSAL,
+      message: '[legend-lite] no row scope',
       engineRowCount: 2,
     });
     expect(records[0]?.detail).toEqual({ engineSQL: 'engine sql' });
@@ -537,7 +535,7 @@ describe(unitTest('legend-lite planner shadow: run'), () => {
   test('a planner that could not be asked is a failure, not a refusal', async () => {
     const { run, records } = TEST__setup({
       generatePlannerSQL: async () => {
-        throw new LegendLitePlannerError('worker', 'could not load');
+        throw new LegendLiteEngineError('worker', 'could not load');
       },
     });
     await new LegendLitePlannerShadow().run(run);
@@ -624,22 +622,5 @@ describe(unitTest('legend-lite planner shadow: run'), () => {
     const third = TEST__setup();
     await shadow.run(third.run);
     expect(third.records).toHaveLength(1);
-  });
-});
-
-describe(unitTest('legend-lite planner: mode from the settings'), () => {
-  test('using the planner takes precedence over comparing it', () => {
-    expect(resolvePlannerMode(false, false)).toBe(
-      LEGEND_DATA_CUBE_PLANNER_MODE.ENGINE,
-    );
-    expect(resolvePlannerMode(false, true)).toBe(
-      LEGEND_DATA_CUBE_PLANNER_MODE.SHADOW,
-    );
-    expect(resolvePlannerMode(true, false)).toBe(
-      LEGEND_DATA_CUBE_PLANNER_MODE.LEGEND_LITE,
-    );
-    expect(resolvePlannerMode(true, true)).toBe(
-      LEGEND_DATA_CUBE_PLANNER_MODE.LEGEND_LITE,
-    );
   });
 });

@@ -55,7 +55,7 @@ import {
   LegendDataCubeSettingKey,
   LegendDataCubeSettingStorageKey,
 } from '../__lib__/LegendDataCubeSetting.js';
-import { resolvePlannerMode } from './planner/LegendLitePlannerRequest.js';
+import { resolvePlannerMode } from './planner/LegendDataCubePlannerMode.js';
 
 declare const AG_GRID_LICENSE: string | undefined;
 

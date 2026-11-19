@@ -17,7 +17,6 @@
 import { unitTest } from '@finos/legend-shared/test';
 import { beforeAll, describe, expect, test } from '@jest/globals';
 import { isPlainObject, type PlainObject } from '@finos/legend-shared';
-import { DataCubeFunction } from '@finos/legend-data-cube';
 import {
   DatabaseType,
   PackageableElementPointerType,
@@ -39,18 +38,14 @@ import {
 } from '@finos/legend-graph';
 import { TEST__getTestGraphManagerState } from '@finos/legend-graph/test';
 import {
-  LegendLitePlannerError,
-  type LegendLitePlannerAnswer,
-} from '../LegendLitePlannerClient.js';
+  LEGEND_LITE_ENGINE_ERROR_KIND,
+  LegendLiteEngineError,
+  type LegendLiteEngineAnswer,
+} from '../LegendLiteEngineTransport.js';
 import {
-  chooseDuckDBPlanner,
-  generateExecutionPlanWithLegendLite,
-  hasCastlessPivot,
-  LEGEND_DATA_CUBE_PLANNER,
-  LEGEND_DATA_CUBE_PLANNER_MODE,
-  LEGEND_LITE_PLANNER_REQUEST_ERROR_KIND,
+  LegendLiteEngineClient,
   liftEmbeddedConnections,
-} from '../LegendLitePlannerRequest.js';
+} from '../LegendLiteEngineClient.js';
 
 // the serializers of the model are set up when a graph manager is initialized, as they are in the application
 beforeAll(async () => {
@@ -131,20 +126,7 @@ const TEST__getRuntimeConnection = (runtime: PlainObject): PlainObject =>
     )[0] as PlainObject
   ).connection as PlainObject;
 
-const TEST__func = (name: string, parameters: unknown[]): PlainObject => ({
-  _type: 'func',
-  function: name,
-  parameters,
-});
-const TEST__lambda = (body: PlainObject): PlainObject => ({
-  _type: 'lambda',
-  body: [body],
-  parameters: [],
-});
-const TEST__SOURCE = { _type: 'classInstance', type: '>', value: {} };
-const TEST__COLS = { _type: 'classInstance', type: 'colSpecArray', value: {} };
-
-describe(unitTest('legend-lite planner request: embedded connections'), () => {
+describe(unitTest('legend-lite engine client: embedded connections'), () => {
   test('the synthesized model embeds its connection, without postProcessorWithParameter', () => {
     // NOTE: this is what the shim exists for; if this test fails, the model no longer
     // has the shape legend-lite refuses, and the shim may no longer be needed
@@ -229,113 +211,21 @@ describe(unitTest('legend-lite planner request: embedded connections'), () => {
   });
 });
 
-describe(unitTest('legend-lite planner request: choice of planner'), () => {
-  const pivot = TEST__func('pivot', [TEST__SOURCE, TEST__COLS, TEST__COLS]);
-  const pivotDiscovery = TEST__lambda(
-    TEST__func('from', [
-      TEST__func('limit', [pivot, { _type: 'integer', value: 0 }]),
-      { _type: 'packageableElementPtr', fullPath: 'local::rt' },
-    ]),
-  );
-  const pivotWithCast = TEST__lambda(
-    TEST__func('from', [
-      TEST__func('groupBy', [
-        TEST__func('cast', [pivot, { _type: 'genericTypeInstance' }]),
-        TEST__COLS,
-        TEST__COLS,
-      ]),
-      { _type: 'packageableElementPtr', fullPath: 'local::rt' },
-    ]),
-  );
-  const noPivot = TEST__lambda(
-    TEST__func('from', [
-      TEST__func('filter', [TEST__SOURCE, TEST__lambda(TEST__SOURCE)]),
-      { _type: 'packageableElementPtr', fullPath: 'local::rt' },
-    ]),
-  );
-
-  test('a pivot that is not followed by a cast is found', () => {
-    expect(hasCastlessPivot(pivotDiscovery)).toBe(true);
-  });
-
-  test('a pivot followed by a cast is not', () => {
-    expect(hasCastlessPivot(pivotWithCast)).toBe(false);
-  });
-
-  test('a query with no pivot is not', () => {
-    expect(hasCastlessPivot(noPivot)).toBe(false);
-  });
-
-  test('functions are matched by full path as well as by name', () => {
-    expect(
-      hasCastlessPivot(
-        TEST__lambda(
-          TEST__func(DataCubeFunction.PIVOT, [TEST__SOURCE, TEST__COLS]),
-        ),
-      ),
-    ).toBe(true);
-    expect(
-      hasCastlessPivot(
-        TEST__lambda(
-          TEST__func(DataCubeFunction.CAST, [
-            TEST__func(DataCubeFunction.PIVOT, [TEST__SOURCE, TEST__COLS]),
-            { _type: 'genericTypeInstance' },
-          ]),
-        ),
-      ),
-    ).toBe(false);
-  });
-
-  test('a cast further out does not count', () => {
-    expect(
-      hasCastlessPivot(
-        TEST__lambda(
-          TEST__func('cast', [
-            TEST__func('limit', [pivot, { _type: 'integer', value: 0 }]),
-            { _type: 'genericTypeInstance' },
-          ]),
-        ),
-      ),
-    ).toBe(true);
-  });
-
-  test('with the engine mode, every query goes to the engine', () => {
-    [pivotDiscovery, pivotWithCast, noPivot].forEach((query) =>
-      expect(
-        chooseDuckDBPlanner(LEGEND_DATA_CUBE_PLANNER_MODE.ENGINE, query),
-      ).toBe(LEGEND_DATA_CUBE_PLANNER.ENGINE),
-    );
-  });
-
-  test('with the legend-lite mode, only a pivot with no cast stays with the engine', () => {
-    expect(
-      chooseDuckDBPlanner(LEGEND_DATA_CUBE_PLANNER_MODE.LEGEND_LITE, noPivot),
-    ).toBe(LEGEND_DATA_CUBE_PLANNER.LEGEND_LITE);
-    expect(
-      chooseDuckDBPlanner(
-        LEGEND_DATA_CUBE_PLANNER_MODE.LEGEND_LITE,
-        pivotWithCast,
-      ),
-    ).toBe(LEGEND_DATA_CUBE_PLANNER.LEGEND_LITE);
-    expect(
-      chooseDuckDBPlanner(
-        LEGEND_DATA_CUBE_PLANNER_MODE.LEGEND_LITE,
-        pivotDiscovery,
-      ),
-    ).toBe(LEGEND_DATA_CUBE_PLANNER.ENGINE);
-  });
-});
-
-describe(unitTest('legend-lite planner request: generate plan'), () => {
-  const TEST__planner = (answer: LegendLitePlannerAnswer) => {
+describe(unitTest('legend-lite engine client: generatePlan'), () => {
+  /** What stands for the engine module: it answers every request the same way, and keeps what it was asked. */
+  const TEST__setup = (answer: LegendLiteEngineAnswer) => {
     const calls: { path: string; query: string; body: string }[] = [];
-    return {
-      calls,
+    let disposed = false;
+    const client = new LegendLiteEngineClient({
       pureV1: async (path: string, query: string, body: string) => {
         calls.push({ path, query, body });
         return answer;
       },
-    };
+      dispose: () => {
+        disposed = true;
+      },
+    });
+    return { client, calls, isDisposed: () => disposed };
   };
   const TEST__input = () => ({
     clientVersion: 'vX_X_X',
@@ -345,29 +235,27 @@ describe(unitTest('legend-lite planner request: generate plan'), () => {
     parameterValues: [],
   });
 
-  test('the planner is asked the engine route, with the input and the model made acceptable', async () => {
+  test('legend-lite is asked the route of the engine, with the input and the model made acceptable', async () => {
     const plan = { _type: 'simple', rootExecutionNode: {} };
-    const planner = TEST__planner({
+    const { client, calls } = TEST__setup({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(plan),
     });
     const input = TEST__input();
 
-    expect(await generateExecutionPlanWithLegendLite(planner, input)).toEqual(
-      plan,
-    );
-    expect(planner.calls).toHaveLength(1);
-    expect(planner.calls[0]?.path).toBe('/api/pure/v1/execution/generatePlan');
-    expect(planner.calls[0]?.query).toBe('');
-    expect(JSON.parse(planner.calls[0]?.body ?? '')).toEqual({
+    expect(await client.generatePlan(input)).toEqual(plan);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.path).toBe('/api/pure/v1/execution/generatePlan');
+    expect(calls[0]?.query).toBe('');
+    expect(JSON.parse(calls[0]?.body ?? '')).toEqual({
       ...input,
       model: liftEmbeddedConnections(input.model),
     });
   });
 
-  test('a refusal is thrown with the message of the planner, and the planner is asked once', async () => {
-    const planner = TEST__planner({
+  test('a refusal is thrown with the message of legend-lite, and legend-lite is asked once', async () => {
+    const { client, calls } = TEST__setup({
       status: 500,
       contentType: 'application/json',
       body: '{"code":-1,"message":"IllegalStateException: no row scope","status":"error"}',
@@ -375,41 +263,61 @@ describe(unitTest('legend-lite planner request: generate plan'), () => {
 
     let thrown: unknown;
     try {
-      await generateExecutionPlanWithLegendLite(planner, TEST__input());
+      await client.generatePlan(TEST__input());
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(LegendLitePlannerError);
-    expect((thrown as LegendLitePlannerError).kind).toBe(
-      LEGEND_LITE_PLANNER_REQUEST_ERROR_KIND.REFUSAL,
+    expect(thrown).toBeInstanceOf(LegendLiteEngineError);
+    expect((thrown as LegendLiteEngineError).kind).toBe(
+      LEGEND_LITE_ENGINE_ERROR_KIND.REFUSAL,
     );
-    expect((thrown as LegendLitePlannerError).message).toBe(
-      '[legend-lite planner] IllegalStateException: no row scope',
+    expect((thrown as LegendLiteEngineError).message).toBe(
+      '[legend-lite] IllegalStateException: no row scope',
     );
-    expect(planner.calls).toHaveLength(1);
+    expect(calls).toHaveLength(1);
   });
 
   test('a refusal whose body is not JSON shows the body', async () => {
     await expect(
-      generateExecutionPlanWithLegendLite(
-        TEST__planner({
-          status: 404,
-          contentType: 'text/plain',
-          body: 'no route',
-        }),
-        TEST__input(),
-      ),
-    ).rejects.toThrow('[legend-lite planner] no route');
+      TEST__setup({
+        status: 404,
+        contentType: 'text/plain',
+        body: 'no route',
+      }).client.generatePlan(TEST__input()),
+    ).rejects.toThrow('[legend-lite] no route');
   });
 
   test('a refusal with no body says its status', async () => {
     await expect(
-      generateExecutionPlanWithLegendLite(
-        TEST__planner({ status: 404, contentType: 'text/plain', body: '' }),
-        TEST__input(),
-      ),
-    ).rejects.toThrow(
-      '[legend-lite planner] The planner answered with status 404',
+      TEST__setup({
+        status: 404,
+        contentType: 'text/plain',
+        body: '',
+      }).client.generatePlan(TEST__input()),
+    ).rejects.toThrow('[legend-lite] legend-lite answered with status 404');
+  });
+
+  test('a model that is not model data is sent as it is', async () => {
+    const { client, calls } = TEST__setup({
+      status: 200,
+      contentType: 'application/json',
+      body: '{}',
+    });
+    const pointer = { _type: 'pointer', sdlcInfo: {} };
+    await client.generatePlan({ ...TEST__input(), model: pointer });
+    expect((JSON.parse(calls[0]?.body ?? '') as PlainObject).model).toEqual(
+      pointer,
     );
+  });
+
+  test('stopping the client stops the engine module', () => {
+    const { client, isDisposed } = TEST__setup({
+      status: 200,
+      contentType: 'application/json',
+      body: '{}',
+    });
+    expect(isDisposed()).toBe(false);
+    client.dispose();
+    expect(isDisposed()).toBe(true);
   });
 });

@@ -15,54 +15,54 @@
  */
 
 /**
- * The worker that holds legend-lite's planner (see `LegendLitePlannerClient.ts`).
+ * The worker that holds legend-lite's engine module (see `LegendLiteEngineTransport.ts`).
  *
  * IMPORTANT: this file must stay self-contained, i.e. it must import nothing at runtime (type imports are
  * erased). It is served as a file of its own and started as a module worker; it is not bundled.
  */
 
 import type {
-  LegendLitePlannerRequest,
-  LegendLitePlannerResponse,
-} from './LegendLitePlannerClient.js';
+  LegendLiteEngineRequest,
+  LegendLiteEngineResponse,
+} from './LegendLiteEngineTransport.js';
 
-type PlannerModule = {
+type EngineModule = {
   exports: {
     pureV1OrError(path: string, rawQuery: string, body: string): string;
   };
 };
 
-type PlannerRuntime = {
+type EngineModuleRuntime = {
   load(
     moduleUrl: string,
     options: {
       stackDeobfuscator: { enabled: boolean };
       installImports(imports: Record<string, unknown>): void;
     },
-  ): Promise<PlannerModule>;
+  ): Promise<EngineModule>;
 };
 
 const scope = globalThis as unknown as {
-  onmessage: ((event: { data: LegendLitePlannerRequest }) => void) | null;
-  postMessage(response: LegendLitePlannerResponse): void;
+  onmessage: ((event: { data: LegendLiteEngineRequest }) => void) | null;
+  postMessage(response: LegendLiteEngineResponse): void;
 };
 
-// the planner is loaded once, by the first request, and kept for as long as this worker lives
-let planner: Promise<PlannerModule> | undefined;
+// the module is loaded once, by the first request, and kept for as long as this worker lives
+let engineModule: Promise<EngineModule> | undefined;
 
-const loadPlanner = async (
+const loadEngineModule = async (
   runtimeUrl: string,
   moduleUrl: string,
-): Promise<PlannerModule> => {
+): Promise<EngineModule> => {
   // NOTE: the runtime is loaded from its URL by the browser itself. It must not be bundled: it decides
   // where it is running by checking for Node's globals, and it imports by computed names
   const runtime = (await import(
     /* webpackIgnore: true */ runtimeUrl
-  )) as PlannerRuntime;
+  )) as EngineModuleRuntime;
   return runtime.load(moduleUrl, {
     stackDeobfuscator: { enabled: false },
     installImports(imports) {
-      // the planner writes its diagnostics one character at a time; what matters comes back in its answers
+      // the module writes its diagnostics one character at a time; what matters comes back in its answers
       imports.teavmConsole = {
         putcharStdout: () => {},
         putcharStderr: () => {},
@@ -73,8 +73,8 @@ const loadPlanner = async (
 
 scope.onmessage = (event) => {
   const { id, runtimeUrl, moduleUrl, path, query, body } = event.data;
-  planner ??= loadPlanner(runtimeUrl, moduleUrl);
-  planner
+  engineModule ??= loadEngineModule(runtimeUrl, moduleUrl);
+  engineModule
     .then((module) =>
       scope.postMessage({
         id,
@@ -83,8 +83,9 @@ scope.onmessage = (event) => {
       }),
     )
     .catch((error: unknown) => {
-      // a planner that failed to load is not kept: the next request tries again
-      planner = undefined;
+      // a module that failed to load, or that failed while answering, is not kept: nothing says it can
+      // still answer, so the next request loads it again
+      engineModule = undefined;
       scope.postMessage({
         id,
         ok: false,

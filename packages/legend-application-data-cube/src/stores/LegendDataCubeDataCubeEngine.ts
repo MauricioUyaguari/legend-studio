@@ -142,7 +142,8 @@ import {
 } from '@finos/legend-shared';
 import type { LegendDataCubeApplicationStore } from './LegendDataCubeBaseStore.js';
 import { LegendDataCubeDuckDBEngine } from './LegendDataCubeDuckDBEngine.js';
-import { LegendLitePlannerClient } from './planner/LegendLitePlannerClient.js';
+import { LegendLiteEngineClient } from './planner/LegendLiteEngineClient.js';
+import { LegendLiteEngineTransport } from './planner/LegendLiteEngineTransport.js';
 import {
   LEGEND_LITE_PLANNER_SHADOW_OUTCOME,
   LegendLitePlannerShadow,
@@ -151,10 +152,9 @@ import {
 } from './planner/LegendLitePlannerShadow.js';
 import {
   chooseDuckDBPlanner,
-  generateExecutionPlanWithLegendLite,
   LEGEND_DATA_CUBE_PLANNER,
   LEGEND_DATA_CUBE_PLANNER_MODE,
-} from './planner/LegendLitePlannerRequest.js';
+} from './planner/LegendDataCubePlannerMode.js';
 import {
   getCacheColumnType,
   getRelationalDataTypeFromDuckDBType,
@@ -275,7 +275,7 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
   private readonly _graphManager: V1_PureGraphManager;
   private readonly _duckDBEngine: LegendDataCubeDuckDBEngine;
   private _plannerMode = LEGEND_DATA_CUBE_PLANNER_MODE.ENGINE;
-  private _legendLitePlannerClient?: LegendLitePlannerClient | undefined;
+  private _legendLiteEngineClient?: LegendLiteEngineClient | undefined;
   private readonly _legendLitePlannerShadow = new LegendLitePlannerShadow();
   private _secondaryOauthClient?: SecondaryOAuthClient;
   private LAKEHOUSE_SECTION = '###Lakehouse';
@@ -322,8 +322,8 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
   }
 
   async dispose() {
-    this._legendLitePlannerClient?.dispose();
-    this._legendLitePlannerClient = undefined;
+    this._legendLiteEngineClient?.dispose();
+    this._legendLiteEngineClient = undefined;
     await this._duckDBEngine.dispose();
   }
 
@@ -334,17 +334,19 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
     this._plannerMode = mode;
   }
 
-  private _getLegendLitePlannerClient() {
-    if (!this._legendLitePlannerClient) {
-      // NOTE: the module that knows where the planner is gets loaded here, on first use, and nowhere
-      // else, so that nothing of the planner is fetched unless the planner is used
-      this._legendLitePlannerClient = new LegendLitePlannerClient(async () =>
-        (
-          await import('./planner/LegendLitePlannerAssets.js')
-        ).createLegendLitePlannerConnection(),
+  private _getLegendLiteEngineClient() {
+    if (!this._legendLiteEngineClient) {
+      // NOTE: the module that knows where legend-lite's engine module is gets loaded here, on first
+      // use, and nowhere else, so that nothing of it is fetched unless legend-lite is used
+      this._legendLiteEngineClient = new LegendLiteEngineClient(
+        new LegendLiteEngineTransport(async () =>
+          (
+            await import('./planner/LegendLiteEngineAssets.js')
+          ).createLegendLiteEngineConnection(),
+        ),
       );
     }
-    return this._legendLitePlannerClient;
+    return this._legendLiteEngineClient;
   }
 
   // ---------------------------------- IMPLEMENTATION ----------------------------------
@@ -1832,8 +1834,7 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
           generatePlannerSQL: async () =>
             this._extractSQLFromExecutionPlan(
               V1_deserializeExecutionPlan(
-                await generateExecutionPlanWithLegendLite(
-                  this._getLegendLitePlannerClient(),
+                await this._getLegendLiteEngineClient().generatePlan(
                   this._buildGeneratePlanInput(query, model, [], planOptions),
                 ),
               ),
@@ -1902,10 +1903,7 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
     try {
       return V1_deserializeExecutionPlan(
         planner === LEGEND_DATA_CUBE_PLANNER.LEGEND_LITE
-          ? await generateExecutionPlanWithLegendLite(
-              this._getLegendLitePlannerClient(),
-              input,
-            )
+          ? await this._getLegendLiteEngineClient().generatePlan(input)
           : await this._engineServerClient.generatePlan(input),
       );
     } catch (err) {
