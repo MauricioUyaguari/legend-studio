@@ -32,6 +32,11 @@ export enum LEGEND_DATACUBE_APP_EVENT {
   LOAD_DATACUBE_TO_DATA__FAILURE = 'data-cube.load-to-data.failure',
   SEARCH_QUERIES = 'data-cube.creator.search-queries',
   CHANGE_SORT_BY = 'data-cube.creator.change-sort-by',
+  PLANNER_SHADOW__MATCH = 'data-cube.planner-shadow.match',
+  PLANNER_SHADOW__DIFFERENCE = 'data-cube.planner-shadow.difference',
+  PLANNER_SHADOW__INCONCLUSIVE = 'data-cube.planner-shadow.inconclusive',
+  PLANNER_SHADOW__REFUSAL = 'data-cube.planner-shadow.refusal',
+  PLANNER_SHADOW__FAILURE = 'data-cube.planner-shadow.failure',
 }
 
 export enum DATA_CUBE_OPEN_KIND {
