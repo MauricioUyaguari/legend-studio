@@ -16,16 +16,13 @@
 
 import { unitTest } from '@finos/legend-shared/test';
 import { describe, expect, test } from '@jest/globals';
-import { type PlainObject } from '@finos/legend-shared';
+import { NetworkClientError, type PlainObject } from '@finos/legend-shared';
 import {
   TabularDataSet,
   TDSExecutionResult,
   TDSRow,
 } from '@finos/legend-graph';
-import {
-  LEGEND_LITE_ENGINE_ERROR_KIND,
-  LegendLiteEngineError,
-} from '../LegendLiteEngineTransport.js';
+import { LegendLiteEngineError } from '../LegendLiteEngineTransport.js';
 import {
   compareShadowResults,
   getQueryLimit,
@@ -511,13 +508,13 @@ describe(unitTest('legend-lite planner shadow: run'), () => {
     });
   });
 
-  test('a refusal is recorded with the message of the planner, and no SQL is run', async () => {
+  test('a refusal is recorded with the status and the message of legend-lite, and no SQL is run', async () => {
     const { run, records, executed } = TEST__setup({
       generatePlannerSQL: async () => {
-        throw new LegendLiteEngineError(
-          LEGEND_LITE_ENGINE_ERROR_KIND.REFUSAL,
-          'no row scope',
-        );
+        // what legend-lite's client throws when a route answers with an error status
+        throw new NetworkClientError({ status: 500 } as Response, {
+          message: 'no row scope',
+        });
       },
     });
     await new LegendLitePlannerShadow().run(run);
@@ -525,8 +522,8 @@ describe(unitTest('legend-lite planner shadow: run'), () => {
     expect(executed).toHaveLength(0);
     expect(records[0]?.record).toMatchObject({
       outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.REFUSED,
-      kind: LEGEND_LITE_ENGINE_ERROR_KIND.REFUSAL,
-      message: '[legend-lite] no row scope',
+      kind: '500',
+      message: 'no row scope',
       engineRowCount: 2,
     });
     expect(records[0]?.detail).toEqual({ engineSQL: 'engine sql' });

@@ -14,34 +14,51 @@
  * limitations under the License.
  */
 
-import type { V1_ExecuteInput, V1_ExecutionPlan } from '@finos/legend-graph';
+import { V1_EngineServerClient } from '@finos/legend-graph';
 import {
+  ContentType,
+  HttpHeader,
+  HttpMethod,
+  HttpStatus,
+  NetworkClientError,
+  createRequestHeaders,
   isPlainObject,
   isString,
+  makeUrl,
+  type Parameters,
+  type Payload,
   type PlainObject,
+  type RequestHeaders,
+  type RequestProcessConfig,
+  type ResponseProcessConfig,
 } from '@finos/legend-shared';
-import {
-  LEGEND_LITE_ENGINE_ERROR_KIND,
-  LegendLiteEngineError,
-  type LegendLiteEngineAnswer,
-} from './LegendLiteEngineTransport.js';
+import type { LegendLiteEngineAnswer } from './LegendLiteEngineTransport.js';
 
 /**
- * A client of legend-lite's engine module, which answers routes of the engine's `pure/v1` API in the
- * browser instead of on the engine server.
+ * The engine server client, answered by legend-lite's engine module in the browser instead of by the
+ * engine server.
  *
- * This mirrors the engine server client (`V1_EngineServerClient`): a method here has the name of the
- * method there, takes the same input and gives the same output, so that a caller chooses a client and
- * nothing else changes. It has only the routes we use from legend-lite so far; when another route is
- * needed, add the method here, with the name and the types it has there.
+ * Every method of the engine server client ends in `request()`. This overrides that one method to ask
+ * the module, so each method keeps its name, its input, its output and its errors, and a caller chooses
+ * a client and nothing else changes.
  *
- * What differs from the engine server client:
- * - a route legend-lite refuses throws a {@link LegendLiteEngineError}, with legend-lite's message
- * - whatever must be adjusted in a request for legend-lite to accept it is adjusted here, so that
- *   callers send what they would send the engine server
+ * - Nothing here is ever sent to a server: `request()` never reaches the network.
+ * - A route legend-lite does not have answers as a server would: with an error status, i.e. a
+ *   `NetworkClientError`. NOTE: by design, nothing falls back to the engine server, so that what
+ *   legend-lite cannot do is seen rather than hidden.
+ * - Whatever must be adjusted in a request for legend-lite to accept it is adjusted here, so that
+ *   callers send what they would send the engine server.
+ * - What only makes sense for a server is ignored: compression, credentials, tracing, and aborting
+ *   a request.
  *
  * NOTE: this is experimental. Nothing uses this client unless the corresponding setting is turned on.
  */
+
+// NOTE: this only gives the routes their paths (e.g. `/api/pure/v1/execution/generatePlan`), which is
+// what legend-lite routes on. `.invalid` is reserved and never resolves, should a request ever escape.
+const LEGEND_LITE_ENGINE_BASE_URL = 'http://legend-lite.invalid/api';
+
+const GENERATE_PLAN_PATH_SUFFIX = '/pure/v1/execution/generatePlan';
 
 const PROTOCOL_TYPE__MODEL_DATA = 'data';
 const PROTOCOL_TYPE__RUNTIME = 'runtime';
@@ -49,6 +66,13 @@ const PROTOCOL_TYPE__CONNECTION = 'connection';
 const PROTOCOL_TYPE__CONNECTION_POINTER = 'connectionPointer';
 const PROTOCOL_TYPE__RELATIONAL_DATABASE_CONNECTION =
   'RelationalDatabaseConnection';
+
+// a response with one of these statuses cannot have a body
+const NULL_BODY_STATUSES: number[] = [
+  HttpStatus.NO_CONTENT,
+  HttpStatus.RESET_CONTENT,
+  HttpStatus.NOT_MODIFIED,
+];
 
 /**
  * Moves each connection embedded in a runtime into an element of its own, which the runtime then
@@ -154,17 +178,17 @@ export const liftEmbeddedConnections = (model: PlainObject): PlainObject => {
     : model;
 };
 
-const extractRefusalMessage = (answer: LegendLiteEngineAnswer): string => {
-  try {
-    const body = JSON.parse(answer.body) as unknown;
-    if (isPlainObject(body) && isString(body.message) && body.message) {
-      return body.message;
-    }
-  } catch {
-    // the body is not JSON: it is shown as it is
-  }
-  return answer.body || `legend-lite answered with status ${answer.status}`;
-};
+/**
+ * Adjusts what a route is sent so that legend-lite accepts it.
+ *
+ * TEMPORARY: see `liftEmbeddedConnections()`.
+ */
+const adjustRequestData = (path: string, data: unknown): unknown =>
+  path.endsWith(GENERATE_PLAN_PATH_SUFFIX) &&
+  isPlainObject(data) &&
+  isPlainObject(data.model)
+    ? { ...data, model: liftEmbeddedConnections(data.model) }
+    : data;
 
 /** What the client needs to reach legend-lite's engine module (see `LegendLiteEngineTransport`). */
 export interface LegendLiteEngineRouter {
@@ -176,10 +200,11 @@ export interface LegendLiteEngineRouter {
   dispose(): void;
 }
 
-export class LegendLiteEngineClient {
+export class LegendLiteEngineClient extends V1_EngineServerClient {
   private readonly _router: LegendLiteEngineRouter;
 
   constructor(router: LegendLiteEngineRouter) {
+    super({ baseUrl: LEGEND_LITE_ENGINE_BASE_URL });
     this._router = router;
   }
 
@@ -189,38 +214,71 @@ export class LegendLiteEngineClient {
   }
 
   /**
-   * Asks a route which takes and gives JSON.
+   * Asks legend-lite's engine module what would be asked of the engine server, and gives its answer
+   * the way the answer of the engine server is given.
    *
-   * @throws a {@link LegendLiteEngineError} when legend-lite refuses the request. NOTE: by design,
-   * nothing here falls back to the engine server, so that what legend-lite cannot do is seen rather
-   * than hidden.
+   * @throws a `NetworkClientError` when the route answers with an error status, as a server would;
+   * and a `LegendLiteEngineError` when the module could not be asked at all
    */
-  private async _post<T>(path: string, data: PlainObject): Promise<T> {
-    const answer = await this._router.pureV1(path, '', JSON.stringify(data));
-    if (answer.status < 200 || answer.status >= 300) {
-      throw new LegendLiteEngineError(
-        LEGEND_LITE_ENGINE_ERROR_KIND.REFUSAL,
-        extractRefusalMessage(answer),
-      );
+  override async request<T>(
+    method: HttpMethod,
+    url: string,
+    data: unknown,
+    options: RequestInit,
+    headers?: RequestHeaders | undefined,
+    parameters?: Parameters | undefined,
+    requestProcessConfig?: RequestProcessConfig | undefined,
+    responseProcessConfig?: ResponseProcessConfig | undefined,
+  ): Promise<T> {
+    const requestUrl = new URL(makeUrl(this.baseUrl, url, parameters ?? {}));
+    const path = requestUrl.pathname;
+    const adjustedData = adjustRequestData(path, data);
+    const answer = await this._router.pureV1(
+      path,
+      requestUrl.search.substring(1),
+      method === HttpMethod.GET ||
+        adjustedData === undefined ||
+        adjustedData === null
+        ? ''
+        : isString(adjustedData)
+          ? adjustedData
+          : JSON.stringify(adjustedData),
+    );
+
+    const response = new Response(
+      NULL_BODY_STATUSES.includes(answer.status) ? null : answer.body,
+      {
+        status: answer.status,
+        headers: { [HttpHeader.CONTENT_TYPE]: answer.contentType },
+      },
+    );
+    // NOTE: from here, this is what the network client does with the response of a server
+    if (!response.ok) {
+      let payload: Payload | undefined = answer.body;
+      try {
+        payload = JSON.parse(answer.body) as Payload;
+      } catch {
+        // the body is not JSON: it is given as it is
+      }
+      throw new NetworkClientError(response, payload);
     }
-    return JSON.parse(answer.body) as T;
+    if (responseProcessConfig?.skipProcessing) {
+      return response as unknown as T;
+    }
+    if (answer.status === HttpStatus.NO_CONTENT) {
+      return undefined as unknown as T;
+    }
+    const accept = createRequestHeaders(method, headers).Accept;
+    switch (accept) {
+      case ContentType.APPLICATION_JSON:
+        return JSON.parse(answer.body) as T;
+      case ContentType.TEXT_PLAIN:
+        return answer.body as unknown as T;
+      default:
+        throw new NetworkClientError(
+          response,
+          `Can't process response for request with Content-Type '${accept}'`,
+        );
+    }
   }
-
-  // ------------------------------------------- Routes -------------------------------------------
-
-  _pure = (): string => `/api/pure/v1`;
-
-  // ------------------------------------------- Execute -------------------------------------------
-
-  _execution = (): string => `${this._pure()}/execution`;
-
-  generatePlan = (
-    input: PlainObject<V1_ExecuteInput>,
-  ): Promise<PlainObject<V1_ExecutionPlan>> =>
-    this._post(`${this._execution()}/generatePlan`, {
-      ...input,
-      model: isPlainObject(input.model)
-        ? liftEmbeddedConnections(input.model)
-        : input.model,
-    });
 }

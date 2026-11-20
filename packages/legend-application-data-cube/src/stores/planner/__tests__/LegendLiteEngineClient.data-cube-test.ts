@@ -16,7 +16,14 @@
 
 import { unitTest } from '@finos/legend-shared/test';
 import { beforeAll, describe, expect, test } from '@jest/globals';
-import { isPlainObject, type PlainObject } from '@finos/legend-shared';
+import {
+  ContentType,
+  HttpHeader,
+  HttpMethod,
+  NetworkClientError,
+  isPlainObject,
+  type PlainObject,
+} from '@finos/legend-shared';
 import {
   DatabaseType,
   PackageableElementPointerType,
@@ -24,6 +31,7 @@ import {
   V1_Database,
   V1_DuckDBDatasourceSpecification,
   V1_EngineRuntime,
+  V1_EngineServerClient,
   V1_IdentifiedConnection,
   V1_PackageableElementPointer,
   V1_PackageableRuntime,
@@ -47,8 +55,25 @@ import {
   liftEmbeddedConnections,
 } from '../LegendLiteEngineClient.js';
 
+/**
+ * jsdom has no `Response`, which the client makes of the answer of legend-lite, the way the network
+ * client is given one by `fetch()`. This has what the client and its errors read of it.
+ */
+class TEST__Response {
+  readonly status: number;
+  readonly statusText = '';
+  readonly url = '';
+  readonly ok: boolean;
+
+  constructor(_body: string | null, init: { status: number }) {
+    this.status = init.status;
+    this.ok = init.status >= 200 && init.status < 300;
+  }
+}
+
 // the serializers of the model are set up when a graph manager is initialized, as they are in the application
 beforeAll(async () => {
+  (globalThis as { Response?: unknown }).Response ??= TEST__Response;
   await TEST__getTestGraphManagerState().graphManager.initialize({
     env: 'test',
     tabSize: 2,
@@ -211,7 +236,7 @@ describe(unitTest('legend-lite engine client: embedded connections'), () => {
   });
 });
 
-describe(unitTest('legend-lite engine client: generatePlan'), () => {
+describe(unitTest('legend-lite engine client: requests'), () => {
   /** What stands for the engine module: it answers every request the same way, and keeps what it was asked. */
   const TEST__setup = (answer: LegendLiteEngineAnswer) => {
     const calls: { path: string; query: string; body: string }[] = [];
@@ -227,6 +252,11 @@ describe(unitTest('legend-lite engine client: generatePlan'), () => {
     });
     return { client, calls, isDisposed: () => disposed };
   };
+  const TEST__json = (body: unknown, status = 200): LegendLiteEngineAnswer => ({
+    status,
+    contentType: 'application/json',
+    body: JSON.stringify(body),
+  });
   const TEST__input = () => ({
     clientVersion: 'vX_X_X',
     function: { _type: 'lambda', body: [], parameters: [] },
@@ -234,14 +264,24 @@ describe(unitTest('legend-lite engine client: generatePlan'), () => {
     context: { _type: 'BaseExecutionContext' },
     parameterValues: [],
   });
+  const TEST__catch = async (promise: Promise<unknown>): Promise<unknown> => {
+    try {
+      await promise;
+    } catch (error) {
+      return error;
+    }
+    throw new Error(`Expected the request to fail`);
+  };
 
-  test('legend-lite is asked the route of the engine, with the input and the model made acceptable', async () => {
+  test('it is an engine server client', () => {
+    expect(TEST__setup(TEST__json({})).client).toBeInstanceOf(
+      V1_EngineServerClient,
+    );
+  });
+
+  test('generatePlan asks legend-lite the route of the engine, with the model made acceptable', async () => {
     const plan = { _type: 'simple', rootExecutionNode: {} };
-    const { client, calls } = TEST__setup({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(plan),
-    });
+    const { client, calls } = TEST__setup(TEST__json(plan));
     const input = TEST__input();
 
     expect(await client.generatePlan(input)).toEqual(plan);
@@ -254,55 +294,8 @@ describe(unitTest('legend-lite engine client: generatePlan'), () => {
     });
   });
 
-  test('a refusal is thrown with the message of legend-lite, and legend-lite is asked once', async () => {
-    const { client, calls } = TEST__setup({
-      status: 500,
-      contentType: 'application/json',
-      body: '{"code":-1,"message":"IllegalStateException: no row scope","status":"error"}',
-    });
-
-    let thrown: unknown;
-    try {
-      await client.generatePlan(TEST__input());
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(LegendLiteEngineError);
-    expect((thrown as LegendLiteEngineError).kind).toBe(
-      LEGEND_LITE_ENGINE_ERROR_KIND.REFUSAL,
-    );
-    expect((thrown as LegendLiteEngineError).message).toBe(
-      '[legend-lite] IllegalStateException: no row scope',
-    );
-    expect(calls).toHaveLength(1);
-  });
-
-  test('a refusal whose body is not JSON shows the body', async () => {
-    await expect(
-      TEST__setup({
-        status: 404,
-        contentType: 'text/plain',
-        body: 'no route',
-      }).client.generatePlan(TEST__input()),
-    ).rejects.toThrow('[legend-lite] no route');
-  });
-
-  test('a refusal with no body says its status', async () => {
-    await expect(
-      TEST__setup({
-        status: 404,
-        contentType: 'text/plain',
-        body: '',
-      }).client.generatePlan(TEST__input()),
-    ).rejects.toThrow('[legend-lite] legend-lite answered with status 404');
-  });
-
   test('a model that is not model data is sent as it is', async () => {
-    const { client, calls } = TEST__setup({
-      status: 200,
-      contentType: 'application/json',
-      body: '{}',
-    });
+    const { client, calls } = TEST__setup(TEST__json({}));
     const pointer = { _type: 'pointer', sdlcInfo: {} };
     await client.generatePlan({ ...TEST__input(), model: pointer });
     expect((JSON.parse(calls[0]?.body ?? '') as PlainObject).model).toEqual(
@@ -310,12 +303,115 @@ describe(unitTest('legend-lite engine client: generatePlan'), () => {
     );
   });
 
-  test('stopping the client stops the engine module', () => {
-    const { client, isDisposed } = TEST__setup({
+  test('a method that was not written here works too: text in, query parameters, JSON out', async () => {
+    const lambda = { _type: 'lambda', body: [], parameters: [] };
+    const { client, calls } = TEST__setup(TEST__json(lambda));
+
+    expect(
+      await client.grammarToJSON_lambda(
+        '|1 + 1',
+        'source',
+        undefined,
+        undefined,
+        false,
+      ),
+    ).toEqual(lambda);
+    expect(calls).toEqual([
+      {
+        path: '/api/pure/v1/grammar/grammarToJson/lambda',
+        // a parameter with no value is left out, as it is for the engine server
+        query: 'sourceId=source&returnSourceInformation=false',
+        body: '|1 + 1',
+      },
+    ]);
+  });
+
+  test('a route that answers text gives the text', async () => {
+    const { client } = TEST__setup({
       status: 200,
-      contentType: 'application/json',
-      body: '{}',
+      contentType: 'text/plain',
+      body: '|1 + 1',
     });
+    expect(
+      await client.request(
+        HttpMethod.POST,
+        `${client.baseUrl}/pure/v1/grammar/jsonToGrammar/lambda`,
+        {},
+        {},
+        { [HttpHeader.ACCEPT]: ContentType.TEXT_PLAIN },
+      ),
+    ).toBe('|1 + 1');
+  });
+
+  test('a request with no body sends none', async () => {
+    const { client, calls } = TEST__setup(TEST__json({}));
+    await client.request(
+      HttpMethod.GET,
+      `${client.baseUrl}/pure/v1/protocol/pure/getSubtypeInfo`,
+      {},
+      {},
+    );
+    expect(calls[0]?.body).toBe('');
+  });
+
+  test('a refusal is the error the engine server client throws, with the message of legend-lite, and legend-lite is asked once', async () => {
+    const { client, calls } = TEST__setup(
+      TEST__json(
+        {
+          code: -1,
+          message: 'IllegalStateException: no row scope',
+          status: 'error',
+        },
+        500,
+      ),
+    );
+
+    const error = await TEST__catch(client.generatePlan(TEST__input()));
+    expect(error).toBeInstanceOf(NetworkClientError);
+    expect((error as NetworkClientError).response.status).toBe(500);
+    expect((error as NetworkClientError).message).toBe(
+      'IllegalStateException: no row scope',
+    );
+    expect((error as NetworkClientError).payload).toMatchObject({
+      message: 'IllegalStateException: no row scope',
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  test('a route legend-lite does not have fails as it would on a server, and is not sent anywhere else', async () => {
+    const { client, calls } = TEST__setup({
+      status: 404,
+      contentType: 'text/plain',
+      body: 'no route',
+    });
+
+    const error = await TEST__catch(
+      client.grammarToJSON_valueSpecification('1 + 1'),
+    );
+    expect(error).toBeInstanceOf(NetworkClientError);
+    expect((error as NetworkClientError).response.status).toBe(404);
+    expect((error as NetworkClientError).message).toBe('no route');
+    // NOTE: a request to a server would have thrown: `fetch()` is blocked in tests
+    expect(calls).toHaveLength(1);
+  });
+
+  test('a failure to ask legend-lite at all is not a network error', async () => {
+    const client = new LegendLiteEngineClient({
+      pureV1: async () => {
+        throw new LegendLiteEngineError(
+          LEGEND_LITE_ENGINE_ERROR_KIND.WORKER,
+          'could not load',
+        );
+      },
+      dispose: () => {},
+    });
+    const error = await TEST__catch(client.generatePlan(TEST__input()));
+    expect(error).toBeInstanceOf(LegendLiteEngineError);
+    expect(error).not.toBeInstanceOf(NetworkClientError);
+  });
+
+  test('stopping the client stops the engine module', () => {
+    const { client, isDisposed } = TEST__setup(TEST__json({}));
     expect(isDisposed()).toBe(false);
     client.dispose();
     expect(isDisposed()).toBe(true);

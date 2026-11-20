@@ -75,8 +75,6 @@ export enum LEGEND_LITE_ENGINE_ERROR_KIND {
   WORKER = 'worker',
   /** The module's answer is not in the form it documents */
   MALFORMED_ANSWER = 'malformed-answer',
-  /** The route answered with an error status, i.e. legend-lite does not do what was asked */
-  REFUSAL = 'refusal',
 }
 
 /**

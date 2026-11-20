@@ -19,11 +19,11 @@ import {
   matchFunctionName,
   type TDSExecutionResult,
 } from '@finos/legend-graph';
-import { isPlainObject, isString } from '@finos/legend-shared';
 import {
-  LEGEND_LITE_ENGINE_ERROR_KIND,
-  LegendLiteEngineError,
-} from './LegendLiteEngineTransport.js';
+  isPlainObject,
+  isString,
+  NetworkClientError,
+} from '@finos/legend-shared';
 import { hasCastlessPivot } from './LegendDataCubePlannerMode.js';
 
 /**
@@ -69,7 +69,7 @@ export enum LEGEND_LITE_PLANNER_SHADOW_FAILURE {
  */
 export type LegendLitePlannerShadowRecord = {
   outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME;
-  /** What differs, what failed, or the kind of refusal the planner reported */
+  /** What differs, what failed, or the status legend-lite refused with */
   kind?: string | undefined;
   message?: string | undefined;
   /** For a match: whether every value is identical, as opposed to numbers equal within the tolerance */
@@ -477,14 +477,16 @@ export class LegendLitePlannerShadow {
     try {
       plannerSQL = await run.generatePlannerSQL();
     } catch (error) {
-      const isRefusal =
-        error instanceof LegendLiteEngineError &&
-        error.kind === LEGEND_LITE_ENGINE_ERROR_KIND.REFUSAL;
+      // NOTE: legend-lite answering with an error status, as a server would, is it saying it does not
+      // do what was asked; anything else is it not having been asked at all
+      const isRefusal = error instanceof NetworkClientError;
       return {
         outcome: isRefusal
           ? LEGEND_LITE_PLANNER_SHADOW_OUTCOME.REFUSED
           : LEGEND_LITE_PLANNER_SHADOW_OUTCOME.FAILED,
-        kind: isRefusal ? error.kind : LEGEND_LITE_PLANNER_SHADOW_FAILURE.PLAN,
+        kind: isRefusal
+          ? String(error.response.status)
+          : LEGEND_LITE_PLANNER_SHADOW_FAILURE.PLAN,
         message: messageOf(error),
       };
     }

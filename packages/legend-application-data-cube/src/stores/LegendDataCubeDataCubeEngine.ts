@@ -143,7 +143,10 @@ import {
 import type { LegendDataCubeApplicationStore } from './LegendDataCubeBaseStore.js';
 import { LegendDataCubeDuckDBEngine } from './LegendDataCubeDuckDBEngine.js';
 import { LegendLiteEngineClient } from './planner/LegendLiteEngineClient.js';
-import { LegendLiteEngineTransport } from './planner/LegendLiteEngineTransport.js';
+import {
+  LegendLiteEngineError,
+  LegendLiteEngineTransport,
+} from './planner/LegendLiteEngineTransport.js';
 import {
   LEGEND_LITE_PLANNER_SHADOW_OUTCOME,
   LegendLitePlannerShadow,
@@ -1900,15 +1903,22 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
       parameterValues,
       options,
     );
+    // NOTE: legend-lite's client is an engine server client, so the two are asked the same way
+    const isLegendLite = planner === LEGEND_DATA_CUBE_PLANNER.LEGEND_LITE;
+    const client = isLegendLite
+      ? this._getLegendLiteEngineClient()
+      : this._engineServerClient;
     try {
-      return V1_deserializeExecutionPlan(
-        planner === LEGEND_DATA_CUBE_PLANNER.LEGEND_LITE
-          ? await this._getLegendLiteEngineClient().generatePlan(input)
-          : await this._engineServerClient.generatePlan(input),
-      );
+      return V1_deserializeExecutionPlan(await client.generatePlan(input));
     } catch (err) {
       assertErrorThrown(err);
-      const error = new DataCubeExecutionError(err.message);
+      const error = new DataCubeExecutionError(
+        // name legend-lite when it is the one which failed, so that its failures are not taken
+        // for the engine server's
+        isLegendLite && !(err instanceof LegendLiteEngineError)
+          ? `[legend-lite] ${err.message}`
+          : err.message,
+      );
       error.executeInput = input;
       throw error;
     }
