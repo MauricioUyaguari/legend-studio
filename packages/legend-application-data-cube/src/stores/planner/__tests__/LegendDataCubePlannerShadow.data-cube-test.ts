@@ -22,19 +22,18 @@ import {
   TDSExecutionResult,
   TDSRow,
 } from '@finos/legend-graph';
-import { LegendLiteEngineError } from '../LegendLiteEngineTransport.js';
 import {
   compareShadowResults,
   getQueryLimit,
   getQuerySortColumns,
-  LEGEND_LITE_PLANNER_SHADOW_DIFFERENCE,
-  LEGEND_LITE_PLANNER_SHADOW_FAILURE,
-  LEGEND_LITE_PLANNER_SHADOW_OUTCOME,
-  LegendLitePlannerShadow,
-  type LegendLitePlannerShadowDetail,
-  type LegendLitePlannerShadowRecord,
-  type LegendLitePlannerShadowRun,
-} from '../LegendLitePlannerShadow.js';
+  LEGEND_DATA_CUBE_PLANNER_SHADOW_DIFFERENCE,
+  LEGEND_DATA_CUBE_PLANNER_SHADOW_FAILURE,
+  LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME,
+  LegendDataCubePlannerShadow,
+  type LegendDataCubePlannerShadowDetail,
+  type LegendDataCubePlannerShadowRecord,
+  type LegendDataCubePlannerShadowRun,
+} from '../LegendDataCubePlannerShadow.js';
 
 type Cell = string | number | boolean | null;
 
@@ -76,7 +75,7 @@ const TEST__queryWithLimit = (limit: number): PlainObject =>
     ]),
   );
 
-describe(unitTest('legend-lite planner shadow: comparison'), () => {
+describe(unitTest('DataCube planner shadow: comparison'), () => {
   const columns = ['region', 'amount'];
 
   test('the same rows in the same order match exactly', () => {
@@ -93,7 +92,7 @@ describe(unitTest('legend-lite planner shadow: comparison'), () => {
         false,
       ),
     ).toEqual({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.MATCH,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.MATCH,
       exact: true,
       sameOrder: true,
     });
@@ -115,7 +114,7 @@ describe(unitTest('legend-lite planner shadow: comparison'), () => {
         false,
       ),
     ).toEqual({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.MATCH,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.MATCH,
       exact: true,
       sameOrder: false,
     });
@@ -129,7 +128,7 @@ describe(unitTest('legend-lite planner shadow: comparison'), () => {
         false,
       ),
     ).toEqual({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.MATCH,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.MATCH,
       exact: false,
       sameOrder: true,
     });
@@ -147,7 +146,7 @@ describe(unitTest('legend-lite planner shadow: comparison'), () => {
         false,
       ),
     ).toEqual({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.MATCH,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.MATCH,
       exact: false,
       sameOrder: false,
     });
@@ -161,8 +160,8 @@ describe(unitTest('legend-lite planner shadow: comparison'), () => {
         false,
       ),
     ).toEqual({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
-      kind: LEGEND_LITE_PLANNER_SHADOW_DIFFERENCE.ROWS,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
+      kind: LEGEND_DATA_CUBE_PLANNER_SHADOW_DIFFERENCE.ROWS,
     });
   });
 
@@ -173,14 +172,14 @@ describe(unitTest('legend-lite planner shadow: comparison'), () => {
         TEST__result(columns, [['EMEA', '1']]),
         false,
       ).outcome,
-    ).toBe(LEGEND_LITE_PLANNER_SHADOW_OUTCOME.DIFFERENT);
+    ).toBe(LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.DIFFERENT);
     expect(
       compareShadowResults(
         TEST__result(columns, [['EMEA', null]]),
         TEST__result(columns, [['EMEA', 0]]),
         false,
       ).outcome,
-    ).toBe(LEGEND_LITE_PLANNER_SHADOW_OUTCOME.DIFFERENT);
+    ).toBe(LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.DIFFERENT);
   });
 
   test('a repeated row counts as many times as it appears', () => {
@@ -198,7 +197,7 @@ describe(unitTest('legend-lite planner shadow: comparison'), () => {
         ]),
         false,
       ).outcome,
-    ).toBe(LEGEND_LITE_PLANNER_SHADOW_OUTCOME.DIFFERENT);
+    ).toBe(LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.DIFFERENT);
   });
 
   test('different columns are different, whatever the rows', () => {
@@ -209,8 +208,8 @@ describe(unitTest('legend-lite planner shadow: comparison'), () => {
         false,
       ),
     ).toEqual({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
-      kind: LEGEND_LITE_PLANNER_SHADOW_DIFFERENCE.COLUMNS,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
+      kind: LEGEND_DATA_CUBE_PLANNER_SHADOW_DIFFERENCE.COLUMNS,
     });
     expect(
       compareShadowResults(
@@ -218,7 +217,7 @@ describe(unitTest('legend-lite planner shadow: comparison'), () => {
         TEST__result(['amount', 'region'], []),
         false,
       ).kind,
-    ).toBe(LEGEND_LITE_PLANNER_SHADOW_DIFFERENCE.COLUMNS);
+    ).toBe(LEGEND_DATA_CUBE_PLANNER_SHADOW_DIFFERENCE.COLUMNS);
   });
 
   test('a different number of rows is different, even when the limit is reached', () => {
@@ -229,8 +228,8 @@ describe(unitTest('legend-lite planner shadow: comparison'), () => {
         true,
       ),
     ).toEqual({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
-      kind: LEGEND_LITE_PLANNER_SHADOW_DIFFERENCE.ROW_COUNT,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
+      kind: LEGEND_DATA_CUBE_PLANNER_SHADOW_DIFFERENCE.ROW_COUNT,
     });
   });
 
@@ -242,8 +241,8 @@ describe(unitTest('legend-lite planner shadow: comparison'), () => {
         true,
       ),
     ).toEqual({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.INCONCLUSIVE,
-      kind: LEGEND_LITE_PLANNER_SHADOW_DIFFERENCE.ROWS,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.INCONCLUSIVE,
+      kind: LEGEND_DATA_CUBE_PLANNER_SHADOW_DIFFERENCE.ROWS,
     });
   });
 
@@ -265,8 +264,8 @@ describe(unitTest('legend-lite planner shadow: comparison'), () => {
         ['amount'],
       ),
     ).toEqual({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
-      kind: LEGEND_LITE_PLANNER_SHADOW_DIFFERENCE.ORDER,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
+      kind: LEGEND_DATA_CUBE_PLANNER_SHADOW_DIFFERENCE.ORDER,
     });
   });
 
@@ -287,7 +286,7 @@ describe(unitTest('legend-lite planner shadow: comparison'), () => {
         ['amount'],
       ),
     ).toEqual({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.MATCH,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.MATCH,
       exact: true,
       sameOrder: false,
     });
@@ -307,7 +306,7 @@ describe(unitTest('legend-lite planner shadow: comparison'), () => {
         false,
         ['elsewhere'],
       ).outcome,
-    ).toBe(LEGEND_LITE_PLANNER_SHADOW_OUTCOME.MATCH);
+    ).toBe(LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.MATCH);
   });
 
   test('two empty results match', () => {
@@ -317,11 +316,11 @@ describe(unitTest('legend-lite planner shadow: comparison'), () => {
         TEST__result(columns, []),
         false,
       ).outcome,
-    ).toBe(LEGEND_LITE_PLANNER_SHADOW_OUTCOME.MATCH);
+    ).toBe(LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.MATCH);
   });
 });
 
-describe(unitTest('legend-lite planner shadow: limit of a query'), () => {
+describe(unitTest('DataCube planner shadow: limit of a query'), () => {
   test('the size of the slice a query ends with, under its from()', () => {
     expect(getQueryLimit(TEST__queryWithLimit(500))).toBe(500);
     expect(
@@ -367,7 +366,7 @@ describe(unitTest('legend-lite planner shadow: limit of a query'), () => {
   });
 });
 
-describe(unitTest('legend-lite planner shadow: sort of a query'), () => {
+describe(unitTest('DataCube planner shadow: sort of a query'), () => {
   const TEST__col = (name: string): PlainObject => ({
     _type: 'classInstance',
     type: 'colSpec',
@@ -421,15 +420,18 @@ describe(unitTest('legend-lite planner shadow: sort of a query'), () => {
   });
 });
 
-describe(unitTest('legend-lite planner shadow: run'), () => {
+describe(unitTest('DataCube planner shadow: run'), () => {
   const columns = ['region', 'amount'];
-  const TEST__setup = (overrides: Partial<LegendLitePlannerShadowRun> = {}) => {
+  const TEST__setup = (
+    overrides: Partial<LegendDataCubePlannerShadowRun> = {},
+  ) => {
     const records: {
-      record: LegendLitePlannerShadowRecord;
-      detail: LegendLitePlannerShadowDetail;
+      record: LegendDataCubePlannerShadowRecord;
+      detail: LegendDataCubePlannerShadowDetail;
     }[] = [];
     const executed: string[] = [];
-    const run: LegendLitePlannerShadowRun = {
+    const run: LegendDataCubePlannerShadowRun = {
+      planner: 'test-planner',
       query: TEST__queryWithLimit(500),
       engine: {
         sql: 'engine sql',
@@ -454,12 +456,13 @@ describe(unitTest('legend-lite planner shadow: run'), () => {
 
   test('the planner SQL is run and a match is recorded, with the texts kept apart', async () => {
     const { run, records, executed } = TEST__setup();
-    await new LegendLitePlannerShadow().run(run);
+    await new LegendDataCubePlannerShadow().run(run);
 
     expect(executed).toEqual(['planner sql']);
     expect(records).toHaveLength(1);
     expect(records[0]?.record).toMatchObject({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.MATCH,
+      planner: 'test-planner',
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.MATCH,
       exact: true,
       sameOrder: false,
       columnCount: 2,
@@ -485,10 +488,10 @@ describe(unitTest('legend-lite planner shadow: run'), () => {
           ['APAC', 3],
         ]),
     });
-    await new LegendLitePlannerShadow().run(run);
+    await new LegendDataCubePlannerShadow().run(run);
     expect(records[0]?.record).toMatchObject({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
-      kind: LEGEND_LITE_PLANNER_SHADOW_DIFFERENCE.ROWS,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
+      kind: LEGEND_DATA_CUBE_PLANNER_SHADOW_DIFFERENCE.ROWS,
     });
   });
 
@@ -501,27 +504,27 @@ describe(unitTest('legend-lite planner shadow: run'), () => {
           ['AMER', 3],
         ]),
     });
-    await new LegendLitePlannerShadow().run(run);
+    await new LegendDataCubePlannerShadow().run(run);
     expect(records[0]?.record).toMatchObject({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.INCONCLUSIVE,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.INCONCLUSIVE,
       limit: 2,
     });
   });
 
-  test('a refusal is recorded with the status and the message of legend-lite, and no SQL is run', async () => {
+  test('a refusal is recorded with the status and the message of the planner, and no SQL is run', async () => {
     const { run, records, executed } = TEST__setup({
       generatePlannerSQL: async () => {
-        // what legend-lite's client throws when a route answers with an error status
+        // what an engine server client throws when a route answers with an error status
         throw new NetworkClientError({ status: 500 } as Response, {
           message: 'no row scope',
         });
       },
     });
-    await new LegendLitePlannerShadow().run(run);
+    await new LegendDataCubePlannerShadow().run(run);
 
     expect(executed).toHaveLength(0);
     expect(records[0]?.record).toMatchObject({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.REFUSED,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.REFUSED,
       kind: '500',
       message: 'no row scope',
       engineRowCount: 2,
@@ -532,13 +535,14 @@ describe(unitTest('legend-lite planner shadow: run'), () => {
   test('a planner that could not be asked is a failure, not a refusal', async () => {
     const { run, records } = TEST__setup({
       generatePlannerSQL: async () => {
-        throw new LegendLiteEngineError('worker', 'could not load');
+        // e.g. the planner's code could not be loaded
+        throw new Error('could not load');
       },
     });
-    await new LegendLitePlannerShadow().run(run);
+    await new LegendDataCubePlannerShadow().run(run);
     expect(records[0]?.record).toMatchObject({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.FAILED,
-      kind: LEGEND_LITE_PLANNER_SHADOW_FAILURE.PLAN,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.FAILED,
+      kind: LEGEND_DATA_CUBE_PLANNER_SHADOW_FAILURE.PLAN,
     });
   });
 
@@ -548,10 +552,10 @@ describe(unitTest('legend-lite planner shadow: run'), () => {
         throw new Error('Parser Error: syntax error');
       },
     });
-    await new LegendLitePlannerShadow().run(run);
+    await new LegendDataCubePlannerShadow().run(run);
     expect(records[0]?.record).toMatchObject({
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.FAILED,
-      kind: LEGEND_LITE_PLANNER_SHADOW_FAILURE.SQL,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.FAILED,
+      kind: LEGEND_DATA_CUBE_PLANNER_SHADOW_FAILURE.SQL,
       message: 'Parser Error: syntax error',
     });
     expect(records[0]?.detail.plannerSQL).toBe('planner sql');
@@ -563,7 +567,7 @@ describe(unitTest('legend-lite planner shadow: run'), () => {
         throw new Error('x'.repeat(5000));
       },
     });
-    await new LegendLitePlannerShadow().run(run);
+    await new LegendDataCubePlannerShadow().run(run);
     expect(records[0]?.record.message).toHaveLength(500);
   });
 
@@ -574,30 +578,13 @@ describe(unitTest('legend-lite planner shadow: run'), () => {
       },
     });
     await expect(
-      new LegendLitePlannerShadow().run(run),
+      new LegendDataCubePlannerShadow().run(run),
     ).resolves.toBeUndefined();
-  });
-
-  test('a query with a pivot and no cast is not compared', async () => {
-    const { run, records, executed } = TEST__setup({
-      query: TEST__lambda(
-        TEST__func('from', [
-          TEST__func('limit', [
-            TEST__func('pivot', [TEST__SOURCE, [], []]),
-            TEST__int(0),
-          ]),
-          TEST__RUNTIME,
-        ]),
-      ),
-    });
-    await new LegendLitePlannerShadow().run(run);
-    expect(executed).toHaveLength(0);
-    expect(records).toHaveLength(0);
   });
 
   test('a query arriving while another is being compared is not compared', async () => {
     let release: (sql: string) => void = () => {};
-    const shadow = new LegendLitePlannerShadow();
+    const shadow = new LegendDataCubePlannerShadow();
     const first = TEST__setup({
       generatePlannerSQL: () =>
         new Promise<string>((resolve) => {

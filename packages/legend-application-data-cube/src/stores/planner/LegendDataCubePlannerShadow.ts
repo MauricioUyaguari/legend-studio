@@ -24,15 +24,15 @@ import {
   isString,
   NetworkClientError,
 } from '@finos/legend-shared';
-import { hasCastlessPivot } from './LegendDataCubePlannerMode.js';
 
 /**
  * Shadow mode: the engine plans every query, as usual, and its result is what the user sees. Afterwards,
- * off the user's path, legend-lite's planner is asked for the same query, its SQL is run on the same
- * DuckDB, and the two results are compared. Nothing here can affect what the user sees.
+ * off the user's path, another planner (contributed by a plugin, see `LegendDataCubeDuckDBQueryPlanner`)
+ * is asked for the same query, its SQL is run on the same DuckDB, and the two results are compared.
+ * Nothing here can affect what the user sees.
  */
 
-export enum LEGEND_LITE_PLANNER_SHADOW_OUTCOME {
+export enum LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME {
   /** Same columns and same rows */
   MATCH = 'match',
   /** Different columns, a different number of rows, or different rows */
@@ -48,7 +48,7 @@ export enum LEGEND_LITE_PLANNER_SHADOW_OUTCOME {
   FAILED = 'failed',
 }
 
-export enum LEGEND_LITE_PLANNER_SHADOW_DIFFERENCE {
+export enum LEGEND_DATA_CUBE_PLANNER_SHADOW_DIFFERENCE {
   COLUMNS = 'columns',
   ROW_COUNT = 'row-count',
   ROWS = 'rows',
@@ -56,7 +56,7 @@ export enum LEGEND_LITE_PLANNER_SHADOW_DIFFERENCE {
   ORDER = 'order',
 }
 
-export enum LEGEND_LITE_PLANNER_SHADOW_FAILURE {
+export enum LEGEND_DATA_CUBE_PLANNER_SHADOW_FAILURE {
   /** Asking the planner failed (as opposed to the planner refusing the query) */
   PLAN = 'plan',
   /** DuckDB could not run the planner's SQL */
@@ -67,9 +67,11 @@ export enum LEGEND_LITE_PLANNER_SHADOW_FAILURE {
  * What is recorded about one comparison. NOTE: this holds counts, timings and messages only. It
  * deliberately holds neither the query nor any SQL, as those carry column names and filter values.
  */
-export type LegendLitePlannerShadowRecord = {
-  outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME;
-  /** What differs, what failed, or the status legend-lite refused with */
+export type LegendDataCubePlannerShadowRecord = {
+  /** The key of the planner compared with the engine */
+  planner: string;
+  outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME;
+  /** What differs, what failed, or the status the planner refused with */
   kind?: string | undefined;
   message?: string | undefined;
   /** For a match: whether every value is identical, as opposed to numbers equal within the tolerance */
@@ -88,17 +90,17 @@ export type LegendLitePlannerShadowRecord = {
 };
 
 /** What a record does not hold; for local debugging only, never to be sent anywhere. */
-export type LegendLitePlannerShadowDetail = {
+export type LegendDataCubePlannerShadowDetail = {
   engineSQL: string;
   plannerSQL?: string | undefined;
 };
 
-export type LegendLitePlannerShadowComparison = {
+export type LegendDataCubePlannerShadowComparison = {
   outcome:
-    | LEGEND_LITE_PLANNER_SHADOW_OUTCOME.MATCH
-    | LEGEND_LITE_PLANNER_SHADOW_OUTCOME.DIFFERENT
-    | LEGEND_LITE_PLANNER_SHADOW_OUTCOME.INCONCLUSIVE;
-  kind?: LEGEND_LITE_PLANNER_SHADOW_DIFFERENCE | undefined;
+    | LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.MATCH
+    | LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.DIFFERENT
+    | LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.INCONCLUSIVE;
+  kind?: LEGEND_DATA_CUBE_PLANNER_SHADOW_DIFFERENCE | undefined;
   exact?: boolean | undefined;
   sameOrder?: boolean | undefined;
 };
@@ -288,7 +290,7 @@ export const compareShadowResults = (
   planner: TDSExecutionResult,
   isLimitReached: boolean,
   sortColumns: string[] = [],
-): LegendLitePlannerShadowComparison => {
+): LegendDataCubePlannerShadowComparison => {
   const engineColumns = engine.result.columns;
   const plannerColumns = planner.result.columns;
   if (
@@ -296,22 +298,22 @@ export const compareShadowResults = (
     engineColumns.some((column, idx) => column !== plannerColumns[idx])
   ) {
     return {
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
-      kind: LEGEND_LITE_PLANNER_SHADOW_DIFFERENCE.COLUMNS,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
+      kind: LEGEND_DATA_CUBE_PLANNER_SHADOW_DIFFERENCE.COLUMNS,
     };
   }
   const engineRows = engine.result.rows.map((row) => row.values);
   const plannerRows = planner.result.rows.map((row) => row.values);
   if (engineRows.length !== plannerRows.length) {
     return {
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
-      kind: LEGEND_LITE_PLANNER_SHADOW_DIFFERENCE.ROW_COUNT,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
+      kind: LEGEND_DATA_CUBE_PLANNER_SHADOW_DIFFERENCE.ROW_COUNT,
     };
   }
   const sameOrder = areRowsEqual(engineRows, plannerRows, areCellsEqual);
   if (sameOrder) {
     return {
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.MATCH,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.MATCH,
       exact: areRowsEqual(engineRows, plannerRows, areCellsIdentical),
       sameOrder,
     };
@@ -346,21 +348,21 @@ export const compareShadowResults = (
       )
     ) {
       return {
-        outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
-        kind: LEGEND_LITE_PLANNER_SHADOW_DIFFERENCE.ORDER,
+        outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
+        kind: LEGEND_DATA_CUBE_PLANNER_SHADOW_DIFFERENCE.ORDER,
       };
     }
     return {
-      outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.MATCH,
+      outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.MATCH,
       exact: isExactInAnyOrder,
       sameOrder: false,
     };
   }
   return {
     outcome: isLimitReached
-      ? LEGEND_LITE_PLANNER_SHADOW_OUTCOME.INCONCLUSIVE
-      : LEGEND_LITE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
-    kind: LEGEND_LITE_PLANNER_SHADOW_DIFFERENCE.ROWS,
+      ? LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.INCONCLUSIVE
+      : LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.DIFFERENT,
+    kind: LEGEND_DATA_CUBE_PLANNER_SHADOW_DIFFERENCE.ROWS,
   };
 };
 
@@ -398,22 +400,24 @@ const messageOf = (error: unknown): string =>
     MAX_MESSAGE_LENGTH,
   );
 
-export type LegendLitePlannerShadowRun = {
+export type LegendDataCubePlannerShadowRun = {
+  /** The key of the planner compared with the engine */
+  planner: string;
   /** The query, as the protocol JSON of its lambda */
   query: unknown;
   /** What the user was shown: the engine's SQL and the result of running it */
   engine: { sql: string; result: TDSExecutionResult };
-  /** Asks legend-lite's planner for the SQL of the same query */
+  /** Asks the planner for the SQL of the same query */
   generatePlannerSQL: () => Promise<string>;
   /** Runs a statement on the DuckDB the engine's SQL was run on */
   runSQL: (sql: string) => Promise<TDSExecutionResult>;
   record: (
-    record: LegendLitePlannerShadowRecord,
-    detail: LegendLitePlannerShadowDetail,
+    record: LegendDataCubePlannerShadowRecord,
+    detail: LegendDataCubePlannerShadowDetail,
   ) => void;
 };
 
-export class LegendLitePlannerShadow {
+export class LegendDataCubePlannerShadow {
   private _isRunning = false;
 
   /**
@@ -423,33 +427,36 @@ export class LegendLitePlannerShadow {
    * none of it is the user's concern. The caller must not wait for it.
    *
    * A query is not compared (and nothing is recorded) when another comparison is still running, so
-   * that shadowing never queues up work behind the user; when it has a pivot with no cast, which stays
-   * with the engine in every mode (see `hasCastlessPivot()`); or when its result is too large.
+   * that shadowing never queues up work behind the user; or when its result is too large. (A query the
+   * planner is not asked for, see `LegendDataCubeDuckDBQueryPlanner.isQuerySupported()`, is not given
+   * to this at all.)
    */
-  async run(run: LegendLitePlannerShadowRun): Promise<void> {
+  async run(run: LegendDataCubePlannerShadowRun): Promise<void> {
     if (
       this._isRunning ||
-      hasCastlessPivot(run.query) ||
       run.engine.result.result.rows.length > MAX_ROWS_TO_COMPARE
     ) {
       return;
     }
     this._isRunning = true;
-    const detail: LegendLitePlannerShadowDetail = { engineSQL: run.engine.sql };
+    const detail: LegendDataCubePlannerShadowDetail = {
+      engineSQL: run.engine.sql,
+    };
     const limit = getQueryLimit(run.query);
     const base = {
+      planner: run.planner,
       columnCount: run.engine.result.result.columns.length,
       engineRowCount: run.engine.result.result.rows.length,
       limit,
     };
-    let record: LegendLitePlannerShadowRecord;
+    let record: LegendDataCubePlannerShadowRecord;
     try {
       record = { ...base, ...(await this._compare(run, detail, limit)) };
     } catch (error) {
       // NOTE: we should not get here, as each step catches its own failures
       record = {
         ...base,
-        outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.FAILED,
+        outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.FAILED,
         message: messageOf(error),
       };
     } finally {
@@ -463,13 +470,13 @@ export class LegendLitePlannerShadow {
   }
 
   private async _compare(
-    run: LegendLitePlannerShadowRun,
-    detail: LegendLitePlannerShadowDetail,
+    run: LegendDataCubePlannerShadowRun,
+    detail: LegendDataCubePlannerShadowDetail,
     limit: number | undefined,
   ): Promise<
     Omit<
-      LegendLitePlannerShadowRecord,
-      'columnCount' | 'engineRowCount' | 'limit'
+      LegendDataCubePlannerShadowRecord,
+      'planner' | 'columnCount' | 'engineRowCount' | 'limit'
     >
   > {
     const planningStart = performance.now();
@@ -477,16 +484,16 @@ export class LegendLitePlannerShadow {
     try {
       plannerSQL = await run.generatePlannerSQL();
     } catch (error) {
-      // NOTE: legend-lite answering with an error status, as a server would, is it saying it does not
-      // do what was asked; anything else is it not having been asked at all
+      // NOTE: the planner's client answering with an error status, as the engine server would, is the
+      // planner saying it does not do what was asked; anything else is it not having been asked at all
       const isRefusal = error instanceof NetworkClientError;
       return {
         outcome: isRefusal
-          ? LEGEND_LITE_PLANNER_SHADOW_OUTCOME.REFUSED
-          : LEGEND_LITE_PLANNER_SHADOW_OUTCOME.FAILED,
+          ? LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.REFUSED
+          : LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.FAILED,
         kind: isRefusal
           ? String(error.response.status)
-          : LEGEND_LITE_PLANNER_SHADOW_FAILURE.PLAN,
+          : LEGEND_DATA_CUBE_PLANNER_SHADOW_FAILURE.PLAN,
         message: messageOf(error),
       };
     }
@@ -499,8 +506,8 @@ export class LegendLitePlannerShadow {
       plannerResult = await run.runSQL(plannerSQL);
     } catch (error) {
       return {
-        outcome: LEGEND_LITE_PLANNER_SHADOW_OUTCOME.FAILED,
-        kind: LEGEND_LITE_PLANNER_SHADOW_FAILURE.SQL,
+        outcome: LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.FAILED,
+        kind: LEGEND_DATA_CUBE_PLANNER_SHADOW_FAILURE.SQL,
         message: messageOf(error),
         plannerPlanningTime,
       };

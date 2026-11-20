@@ -142,22 +142,21 @@ import {
 } from '@finos/legend-shared';
 import type { LegendDataCubeApplicationStore } from './LegendDataCubeBaseStore.js';
 import { LegendDataCubeDuckDBEngine } from './LegendDataCubeDuckDBEngine.js';
-import { LegendLiteEngineClient } from './planner/LegendLiteEngineClient.js';
 import {
-  LegendLiteEngineError,
-  LegendLiteEngineTransport,
-} from './planner/LegendLiteEngineTransport.js';
+  LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME,
+  LegendDataCubePlannerShadow,
+  type LegendDataCubePlannerShadowDetail,
+  type LegendDataCubePlannerShadowRecord,
+} from './planner/LegendDataCubePlannerShadow.js';
 import {
-  LEGEND_LITE_PLANNER_SHADOW_OUTCOME,
-  LegendLitePlannerShadow,
-  type LegendLitePlannerShadowDetail,
-  type LegendLitePlannerShadowRecord,
-} from './planner/LegendLitePlannerShadow.js';
-import {
-  chooseDuckDBPlanner,
-  LEGEND_DATA_CUBE_PLANNER,
+  chooseDuckDBQueryPlanner,
+  ENGINE_PLANNER_SELECTION,
+  isQuerySupportedByPlanner,
   LEGEND_DATA_CUBE_PLANNER_MODE,
-} from './planner/LegendDataCubePlannerMode.js';
+  type LegendDataCubeDuckDBQueryPlanner,
+  type LegendDataCubePlannerSelection,
+  type LegendDataCubeQueryPlannerClient,
+} from './planner/LegendDataCubeQueryPlanner.js';
 import {
   getCacheColumnType,
   getRelationalDataTypeFromDuckDBType,
@@ -254,18 +253,18 @@ const normalizeIngestColumnTypePath = (
 };
 
 const PLANNER_SHADOW_EVENT: Record<
-  LEGEND_LITE_PLANNER_SHADOW_OUTCOME,
+  LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME,
   LEGEND_DATACUBE_APP_EVENT
 > = {
-  [LEGEND_LITE_PLANNER_SHADOW_OUTCOME.MATCH]:
+  [LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.MATCH]:
     LEGEND_DATACUBE_APP_EVENT.PLANNER_SHADOW__MATCH,
-  [LEGEND_LITE_PLANNER_SHADOW_OUTCOME.DIFFERENT]:
+  [LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.DIFFERENT]:
     LEGEND_DATACUBE_APP_EVENT.PLANNER_SHADOW__DIFFERENCE,
-  [LEGEND_LITE_PLANNER_SHADOW_OUTCOME.INCONCLUSIVE]:
+  [LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.INCONCLUSIVE]:
     LEGEND_DATACUBE_APP_EVENT.PLANNER_SHADOW__INCONCLUSIVE,
-  [LEGEND_LITE_PLANNER_SHADOW_OUTCOME.REFUSED]:
+  [LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.REFUSED]:
     LEGEND_DATACUBE_APP_EVENT.PLANNER_SHADOW__REFUSAL,
-  [LEGEND_LITE_PLANNER_SHADOW_OUTCOME.FAILED]:
+  [LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.FAILED]:
     LEGEND_DATACUBE_APP_EVENT.PLANNER_SHADOW__FAILURE,
 };
 
@@ -277,9 +276,13 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
   private readonly _lakehouseIngestServerClient: LakehouseIngestServerClient;
   private readonly _graphManager: V1_PureGraphManager;
   private readonly _duckDBEngine: LegendDataCubeDuckDBEngine;
-  private _plannerMode = LEGEND_DATA_CUBE_PLANNER_MODE.ENGINE;
-  private _legendLiteEngineClient?: LegendLiteEngineClient | undefined;
-  private readonly _legendLitePlannerShadow = new LegendLitePlannerShadow();
+  private _plannerSelection: LegendDataCubePlannerSelection =
+    ENGINE_PLANNER_SELECTION;
+  private readonly _plannerClients = new Map<
+    LegendDataCubeDuckDBQueryPlanner,
+    LegendDataCubeQueryPlannerClient
+  >();
+  private readonly _plannerShadow = new LegendDataCubePlannerShadow();
   private _secondaryOauthClient?: SecondaryOAuthClient;
   private LAKEHOUSE_SECTION = '###Lakehouse';
 
@@ -325,31 +328,29 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
   }
 
   async dispose() {
-    this._legendLiteEngineClient?.dispose();
-    this._legendLiteEngineClient = undefined;
+    this._plannerClients.forEach((client) => client.dispose?.());
+    this._plannerClients.clear();
     await this._duckDBEngine.dispose();
   }
 
   /**
    * Sets how the SQL of queries on DuckDB-backed sources is generated; takes effect from the next query.
    */
-  setPlannerMode(mode: LEGEND_DATA_CUBE_PLANNER_MODE) {
-    this._plannerMode = mode;
+  setPlannerSelection(selection: LegendDataCubePlannerSelection) {
+    this._plannerSelection = selection;
   }
 
-  private _getLegendLiteEngineClient() {
-    if (!this._legendLiteEngineClient) {
-      // NOTE: the module that knows where legend-lite's engine module is gets loaded here, on first
-      // use, and nowhere else, so that nothing of it is fetched unless legend-lite is used
-      this._legendLiteEngineClient = new LegendLiteEngineClient(
-        new LegendLiteEngineTransport(async () =>
-          (
-            await import('./planner/LegendLiteEngineAssets.js')
-          ).createLegendLiteEngineConnection(),
-        ),
-      );
+  /**
+   * NOTE: a planner's client is created when the planner is first asked, and nowhere else, so that
+   * nothing of it is loaded unless it is used.
+   */
+  private _getPlannerClient(planner: LegendDataCubeDuckDBQueryPlanner) {
+    let client = this._plannerClients.get(planner);
+    if (!client) {
+      client = planner.createEngineServerClient();
+      this._plannerClients.set(planner, client);
     }
-    return this._legendLiteEngineClient;
+    return client;
   }
 
   // ---------------------------------- IMPLEMENTATION ----------------------------------
@@ -1820,24 +1821,30 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
         model,
         [],
         planOptions,
-        chooseDuckDBPlanner(this._plannerMode, serializedQuery),
+        chooseDuckDBQueryPlanner(this._plannerSelection, serializedQuery),
       ),
     );
     const endTime = performance.now();
     const executedQuery = await queryCodePromise;
     const result = await this._duckDBEngine.runSQLQuery(sql);
 
-    if (this._plannerMode === LEGEND_DATA_CUBE_PLANNER_MODE.SHADOW) {
+    const selection = this._plannerSelection;
+    if (
+      selection.mode === LEGEND_DATA_CUBE_PLANNER_MODE.SHADOW &&
+      isQuerySupportedByPlanner(selection.planner, serializedQuery)
+    ) {
+      const planner = selection.planner;
       // NOTE: this is deliberately not awaited: the user has their result, and what follows compares
-      // it with legend-lite's planner in the background. It never throws.
-      this._legendLitePlannerShadow
+      // it with the planner in the background. It never throws.
+      this._plannerShadow
         .run({
+          planner: planner.key,
           query: serializedQuery,
           engine: { sql, result },
           generatePlannerSQL: async () =>
             this._extractSQLFromExecutionPlan(
               V1_deserializeExecutionPlan(
-                await this._getLegendLiteEngineClient().generatePlan(
+                await this._getPlannerClient(planner).generatePlan(
                   this._buildGeneratePlanInput(query, model, [], planOptions),
                 ),
               ),
@@ -1869,8 +1876,8 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
   }
 
   private _recordPlannerShadow(
-    record: LegendLitePlannerShadowRecord,
-    detail: LegendLitePlannerShadowDetail,
+    record: LegendDataCubePlannerShadowRecord,
+    detail: LegendDataCubePlannerShadowDetail,
     queryCode: string,
   ) {
     // NOTE: the query and the SQL texts carry column names and filter values, so they are only
@@ -1895,7 +1902,7 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
     model: PlainObject<V1_PureModelContext>,
     parameterValues?: V1_ParameterValue[] | undefined,
     options?: DataCubeExecutionOptions | undefined,
-    planner = LEGEND_DATA_CUBE_PLANNER.ENGINE,
+    planner?: LegendDataCubeDuckDBQueryPlanner | undefined,
   ): Promise<V1_ExecutionPlan> {
     const input = this._buildGeneratePlanInput(
       query,
@@ -1903,21 +1910,18 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
       parameterValues,
       options,
     );
-    // NOTE: legend-lite's client is an engine server client, so the two are asked the same way
-    const isLegendLite = planner === LEGEND_DATA_CUBE_PLANNER.LEGEND_LITE;
-    const client = isLegendLite
-      ? this._getLegendLiteEngineClient()
+    // NOTE: a planner's client is an engine server client, so the two are asked the same way
+    const client = planner
+      ? this._getPlannerClient(planner)
       : this._engineServerClient;
     try {
       return V1_deserializeExecutionPlan(await client.generatePlan(input));
     } catch (err) {
       assertErrorThrown(err);
       const error = new DataCubeExecutionError(
-        // name legend-lite when it is the one which failed, so that its failures are not taken
-        // for the engine server's
-        isLegendLite && !(err instanceof LegendLiteEngineError)
-          ? `[legend-lite] ${err.message}`
-          : err.message,
+        // name the planner when it is the one which failed, so that its failures are not taken for
+        // the engine server's
+        planner ? `[${planner.label}] ${err.message}` : err.message,
       );
       error.executeInput = input;
       throw error;
