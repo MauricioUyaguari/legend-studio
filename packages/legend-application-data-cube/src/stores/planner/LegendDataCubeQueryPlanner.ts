@@ -35,14 +35,12 @@ export type LegendDataCubeQueryPlannerClient = V1_EngineServerClient & {
  * place.
  *
  * Contributed by a plugin, see `LegendDataCubeApplicationPlugin.getExtraDuckDBQueryPlanners()`. Each
- * contributed planner adds two settings, both off by default: one to use the planner instead of the
- * engine server, and one to keep using the engine server and compare the planner with it in the
- * background.
+ * contributed planner adds one setting, off by default, to use the planner instead of the engine server.
  */
 export interface LegendDataCubeDuckDBQueryPlanner {
-  /** Identifies the planner, in the keys of its settings and in telemetry; unique among planners */
+  /** Identifies the planner, in the key of its setting; unique among planners */
   key: string;
-  /** Names the planner to the user, in the titles of its settings and in its error messages */
+  /** Names the planner to the user, in the title of its setting and in its error messages */
   label: string;
   /**
    * Creates the client the planner generates plans with. Called at most once, when the planner is
@@ -51,7 +49,7 @@ export interface LegendDataCubeDuckDBQueryPlanner {
   createEngineServerClient(): LegendDataCubeQueryPlannerClient;
   /**
    * Whether the planner is asked for this query (the protocol JSON of its lambda); a query it is not
-   * asked for goes to the engine server, in every mode. When absent, it is asked for every query.
+   * asked for goes to the engine server. When absent, it is asked for every query.
    *
    * NOTE: this must be a fixed rule by the shape of the query, decided before anything is asked. It is
    * not a fallback: a query sent to the planner which the planner fails on is NOT retried on the engine
@@ -60,43 +58,13 @@ export interface LegendDataCubeDuckDBQueryPlanner {
   isQuerySupported?(query: PlainObject<V1_Lambda>): boolean;
 }
 
-/** How the SQL of queries on DuckDB-backed sources is generated. */
-export enum LEGEND_DATA_CUBE_PLANNER_MODE {
-  /** The engine server generates every plan. This is the default. */
-  ENGINE = 'engine',
-  /**
-   * The engine server generates every plan and the user sees its result; afterwards, in the background,
-   * the planner is asked for the same query and the two results are compared (experimental)
-   */
-  SHADOW = 'shadow',
-  /** The planner generates the plans it is asked for (experimental) */
-  PLANNER = 'planner',
-}
-
-export type LegendDataCubePlannerSelection =
-  | { mode: LEGEND_DATA_CUBE_PLANNER_MODE.ENGINE }
-  | {
-      mode:
-        | LEGEND_DATA_CUBE_PLANNER_MODE.SHADOW
-        | LEGEND_DATA_CUBE_PLANNER_MODE.PLANNER;
-      planner: LegendDataCubeDuckDBQueryPlanner;
-    };
-
-export const ENGINE_PLANNER_SELECTION: LegendDataCubePlannerSelection = {
-  mode: LEGEND_DATA_CUBE_PLANNER_MODE.ENGINE,
-};
-
-/** The keys of the two settings of a planner, see `LegendDataCubeDuckDBQueryPlanner`. */
-export const getPlannerSettingKeys = (planner: {
-  key: string;
-}): { use: string; shadow: string } => ({
-  use: `debugger.planner.${planner.key}.enabled`,
-  shadow: `debugger.planner.${planner.key}.shadow`,
-});
+/** The key of a planner's setting, see `LegendDataCubeDuckDBQueryPlanner`. */
+export const getPlannerSettingKey = (planner: { key: string }): string =>
+  `debugger.planner.${planner.key}.enabled`;
 
 /**
  * Checks the planners the plugins contribute: each must have a key of its own, since the key names its
- * settings.
+ * setting.
  */
 export const validateDuckDBQueryPlanners = (
   planners: LegendDataCubeDuckDBQueryPlanner[],
@@ -119,46 +87,24 @@ export const validateDuckDBQueryPlanners = (
 };
 
 /**
- * The selection the settings stand for. Using a planner takes precedence over comparing one; among
- * planners, the first (in the order the plugins contribute them) takes precedence. With no planner
- * contributed, every plan is the engine server's, whatever is stored in the settings.
+ * The planner the settings put in use, if any: the first (in the order the plugins contribute them)
+ * whose setting is on. With none, every plan is the engine server's; with no planner contributed, that
+ * holds whatever is stored in the settings.
  */
-export const resolvePlannerSelection = (
+export const resolvePlannerInUse = (
   planners: LegendDataCubeDuckDBQueryPlanner[],
   isEnabled: (settingKey: string) => boolean,
-): LegendDataCubePlannerSelection => {
-  const used = planners.find((planner) =>
-    isEnabled(getPlannerSettingKeys(planner).use),
-  );
-  if (used) {
-    return { mode: LEGEND_DATA_CUBE_PLANNER_MODE.PLANNER, planner: used };
-  }
-  const shadowed = planners.find((planner) =>
-    isEnabled(getPlannerSettingKeys(planner).shadow),
-  );
-  if (shadowed) {
-    return { mode: LEGEND_DATA_CUBE_PLANNER_MODE.SHADOW, planner: shadowed };
-  }
-  return ENGINE_PLANNER_SELECTION;
-};
-
-/**
- * Whether the planner is asked for this query; see `LegendDataCubeDuckDBQueryPlanner.isQuerySupported()`.
- */
-export const isQuerySupportedByPlanner = (
-  planner: LegendDataCubeDuckDBQueryPlanner,
-  query: PlainObject<V1_Lambda>,
-): boolean => planner.isQuerySupported?.(query) ?? true;
+): LegendDataCubeDuckDBQueryPlanner | undefined =>
+  planners.find((planner) => isEnabled(getPlannerSettingKey(planner)));
 
 /**
  * Chooses the planner which generates the plan of a query on a DuckDB-backed source: `undefined` means
- * the engine server.
+ * the engine server. See `LegendDataCubeDuckDBQueryPlanner.isQuerySupported()`.
  */
 export const chooseDuckDBQueryPlanner = (
-  selection: LegendDataCubePlannerSelection,
+  plannerInUse: LegendDataCubeDuckDBQueryPlanner | undefined,
   query: PlainObject<V1_Lambda>,
 ): LegendDataCubeDuckDBQueryPlanner | undefined =>
-  selection.mode === LEGEND_DATA_CUBE_PLANNER_MODE.PLANNER &&
-  isQuerySupportedByPlanner(selection.planner, query)
-    ? selection.planner
+  plannerInUse && (plannerInUse.isQuerySupported?.(query) ?? true)
+    ? plannerInUse
     : undefined;

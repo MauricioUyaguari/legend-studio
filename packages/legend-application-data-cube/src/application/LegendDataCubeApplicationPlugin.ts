@@ -48,8 +48,7 @@ export class LegendDataCubeApplicationPlugin extends LegendApplicationPlugin {
    * Get the list of planners, other than the engine server, which can generate the execution plans of
    * queries on DuckDB-backed sources (i.e. cached sources, local files and cached Iceberg tables).
    *
-   * Each planner adds two settings, both off by default: one to use it instead of the engine server, and
-   * one to keep using the engine server and compare the planner with it in the background. With no
+   * Each planner adds one setting, off by default, to use it instead of the engine server. With no
    * planner contributed, nothing changes. See `LegendDataCubeDuckDBQueryPlanner`.
    */
   getExtraDuckDBQueryPlanners?(): LegendDataCubeDuckDBQueryPlanner[];

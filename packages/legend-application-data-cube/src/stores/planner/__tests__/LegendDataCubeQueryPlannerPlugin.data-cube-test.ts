@@ -24,11 +24,7 @@ import { Core_LegendDataCubeApplicationPlugin } from '../../../application/Core_
 import { Core_LegendDataCube_LegendApplicationPlugin } from '../../../application/Core_LegendDataCube_LegendApplicationPlugin.js';
 import { TEST__getTestLegendDataCubeApplicationConfig } from '../../../application/__test-utils__/LegendDataCubeApplicationTestUtils.js';
 import { LegendDataCubeBaseStore } from '../../LegendDataCubeBaseStore.js';
-import {
-  LEGEND_DATA_CUBE_PLANNER_MODE,
-  type LegendDataCubeDuckDBQueryPlanner,
-  type LegendDataCubePlannerSelection,
-} from '../LegendDataCubeQueryPlanner.js';
+import type { LegendDataCubeDuckDBQueryPlanner } from '../LegendDataCubeQueryPlanner.js';
 
 // `LegendDataCubeDuckDBEngine` uses `import.meta`, which jest can't parse; it is unused here
 // NOTE: the factory is hoisted above the `@jest/globals` import, so it must not
@@ -80,10 +76,7 @@ const TEST__createBaseStore = (
   );
 };
 
-const PLANNER_SETTING_KEYS = [
-  'debugger.planner.test-planner.enabled',
-  'debugger.planner.test-planner.shadow',
-];
+const PLANNER_SETTING_KEY = 'debugger.planner.test-planner.enabled';
 
 describe(unitTest('DataCube query planner: contributed by a plugin'), () => {
   test('with no plugin contributing a planner, there is no planner setting', () => {
@@ -96,55 +89,46 @@ describe(unitTest('DataCube query planner: contributed by a plugin'), () => {
     ).toEqual([]);
   });
 
-  test('a contributed planner adds its two settings, off by default, and its client is not created until it is asked', () => {
+  test('a contributed planner adds its setting, off by default, and its client is not created until it is asked', () => {
     const plugin = new TEST__PlannerPlugin();
     const store = TEST__createBaseStore([plugin]);
 
     expect(store.duckDBQueryPlanners).toEqual([plugin.planner]);
     const settings = store.settings.filter((setting) =>
-      PLANNER_SETTING_KEYS.includes(setting.key),
+      setting.key.startsWith('debugger.planner.'),
     );
-    expect(settings.map((setting) => setting.key)).toEqual(
-      PLANNER_SETTING_KEYS,
-    );
-    expect(settings.map((setting) => setting.defaultValue)).toEqual([
-      false,
-      false,
+    expect(settings.map((setting) => setting.key)).toEqual([
+      PLANNER_SETTING_KEY,
     ]);
+    expect(settings[0]?.defaultValue).toBe(false);
     expect(settings[0]?.title).toContain('Test Planner');
     expect(plugin.createEngineServerClient).not.toHaveBeenCalled();
   });
 
-  test('turning the settings on and off selects the planner, using it taking precedence over comparing it', () => {
+  test('turning the setting on and off puts the planner in use and out of it', () => {
     const plugin = new TEST__PlannerPlugin();
     const store = TEST__createBaseStore([plugin]);
-    const selections: LegendDataCubePlannerSelection[] = [];
+    const inUse: (LegendDataCubeDuckDBQueryPlanner | undefined)[] = [];
     jest
-      .spyOn(store.engine, 'setPlannerSelection')
-      .mockImplementation((selection) => {
-        selections.push(selection);
+      .spyOn(store.engine, 'setPlannerInUse')
+      .mockImplementation((planner) => {
+        inUse.push(planner);
       });
-    const setting = (key: string) =>
-      store.settings.find((candidate) => candidate.key === key);
-    const toggle = (key: string, value: boolean) =>
-      setting(key)?.action?.(
+    const setting = store.settings.find(
+      (candidate) => candidate.key === PLANNER_SETTING_KEY,
+    );
+    const toggle = (value: boolean) =>
+      setting?.action?.(
         undefined as unknown as Parameters<
-          NonNullable<NonNullable<ReturnType<typeof setting>>['action']>
+          NonNullable<NonNullable<typeof setting>['action']>
         >[0],
         value,
       );
 
-    toggle('debugger.planner.test-planner.shadow', true);
-    toggle('debugger.planner.test-planner.enabled', true);
-    toggle('debugger.planner.test-planner.enabled', false);
-    toggle('debugger.planner.test-planner.shadow', false);
+    toggle(true);
+    toggle(false);
 
-    expect(selections).toEqual([
-      { mode: LEGEND_DATA_CUBE_PLANNER_MODE.SHADOW, planner: plugin.planner },
-      { mode: LEGEND_DATA_CUBE_PLANNER_MODE.PLANNER, planner: plugin.planner },
-      { mode: LEGEND_DATA_CUBE_PLANNER_MODE.SHADOW, planner: plugin.planner },
-      { mode: LEGEND_DATA_CUBE_PLANNER_MODE.ENGINE },
-    ]);
+    expect(inUse).toEqual([plugin.planner, undefined]);
     expect(plugin.createEngineServerClient).not.toHaveBeenCalled();
   });
 

@@ -20,10 +20,8 @@ import { type PlainObject } from '@finos/legend-shared';
 import { V1_EngineServerClient } from '@finos/legend-graph';
 import {
   chooseDuckDBQueryPlanner,
-  ENGINE_PLANNER_SELECTION,
-  getPlannerSettingKeys,
-  LEGEND_DATA_CUBE_PLANNER_MODE,
-  resolvePlannerSelection,
+  getPlannerSettingKey,
+  resolvePlannerInUse,
   validateDuckDBQueryPlanners,
   type LegendDataCubeDuckDBQueryPlanner,
 } from '../LegendDataCubeQueryPlanner.js';
@@ -57,11 +55,10 @@ const TEST__settings =
     enabled.includes(settingKey);
 
 describe(unitTest('DataCube query planner: planners from plugins'), () => {
-  test('each planner has two settings, named by its key', () => {
-    expect(getPlannerSettingKeys({ key: 'my-planner' })).toEqual({
-      use: 'debugger.planner.my-planner.enabled',
-      shadow: 'debugger.planner.my-planner.shadow',
-    });
+  test('each planner has one setting, named by its key', () => {
+    expect(getPlannerSettingKey({ key: 'my-planner' })).toBe(
+      'debugger.planner.my-planner.enabled',
+    );
   });
 
   test('planners with keys of their own are accepted', () => {
@@ -83,61 +80,41 @@ describe(unitTest('DataCube query planner: planners from plugins'), () => {
   });
 });
 
-describe(
-  unitTest('DataCube query planner: selection from the settings'),
-  () => {
-    const a = TEST__planner('a');
-    const b = TEST__planner('b');
+describe(unitTest('DataCube query planner: the planner in use'), () => {
+  const a = TEST__planner('a');
+  const b = TEST__planner('b');
 
-    test('with no planner, the engine plans, whatever is stored in the settings', () => {
-      expect(
-        resolvePlannerSelection(
-          [],
-          TEST__settings([
-            'debugger.planner.a.enabled',
-            'debugger.planner.a.shadow',
-          ]),
-        ),
-      ).toEqual(ENGINE_PLANNER_SELECTION);
-    });
+  test('with no planner, the engine plans, whatever is stored in the settings', () => {
+    expect(
+      resolvePlannerInUse([], TEST__settings(['debugger.planner.a.enabled'])),
+    ).toBeUndefined();
+  });
 
-    test('with no setting on, the engine plans', () => {
-      expect(resolvePlannerSelection([a, b], TEST__settings([]))).toEqual(
-        ENGINE_PLANNER_SELECTION,
-      );
-    });
+  test('with no setting on, the engine plans', () => {
+    expect(resolvePlannerInUse([a, b], TEST__settings([]))).toBeUndefined();
+  });
 
-    test('using a planner takes precedence over comparing one', () => {
-      expect(
-        resolvePlannerSelection(
-          [a, b],
-          TEST__settings([
-            'debugger.planner.a.shadow',
-            'debugger.planner.b.enabled',
-          ]),
-        ),
-      ).toEqual({ mode: LEGEND_DATA_CUBE_PLANNER_MODE.PLANNER, planner: b });
-      expect(
-        resolvePlannerSelection(
-          [a],
-          TEST__settings(['debugger.planner.a.shadow']),
-        ),
-      ).toEqual({ mode: LEGEND_DATA_CUBE_PLANNER_MODE.SHADOW, planner: a });
-    });
+  test('the planner whose setting is on is in use', () => {
+    expect(
+      resolvePlannerInUse(
+        [a, b],
+        TEST__settings(['debugger.planner.b.enabled']),
+      ),
+    ).toBe(b);
+  });
 
-    test('among planners, the first contributed takes precedence', () => {
-      expect(
-        resolvePlannerSelection(
-          [a, b],
-          TEST__settings([
-            'debugger.planner.b.enabled',
-            'debugger.planner.a.enabled',
-          ]),
-        ),
-      ).toEqual({ mode: LEGEND_DATA_CUBE_PLANNER_MODE.PLANNER, planner: a });
-    });
-  },
-);
+  test('among planners, the first contributed takes precedence', () => {
+    expect(
+      resolvePlannerInUse(
+        [a, b],
+        TEST__settings([
+          'debugger.planner.b.enabled',
+          'debugger.planner.a.enabled',
+        ]),
+      ),
+    ).toBe(a);
+  });
+});
 
 describe(unitTest('DataCube query planner: choice of planner'), () => {
   const query = TEST__lambda(TEST__func('filter', [TEST__SOURCE]));
@@ -147,36 +124,17 @@ describe(unitTest('DataCube query planner: choice of planner'), () => {
     isQuerySupported: (lambda) => !JSON.stringify(lambda).includes('pivot'),
   });
 
-  test('with the engine selected, every query goes to the engine', () => {
-    expect(
-      chooseDuckDBQueryPlanner(ENGINE_PLANNER_SELECTION, query),
-    ).toBeUndefined();
+  test('with no planner in use, every query goes to the engine', () => {
+    expect(chooseDuckDBQueryPlanner(undefined, query)).toBeUndefined();
   });
 
-  test('when the planner is compared, every query still goes to the engine', () => {
-    expect(
-      chooseDuckDBQueryPlanner(
-        { mode: LEGEND_DATA_CUBE_PLANNER_MODE.SHADOW, planner: everything },
-        query,
-      ),
-    ).toBeUndefined();
-  });
-
-  test('when the planner is used, it is asked for every query it supports', () => {
-    const selection = {
-      mode: LEGEND_DATA_CUBE_PLANNER_MODE.PLANNER,
-      planner: everything,
-    } as const;
-    expect(chooseDuckDBQueryPlanner(selection, query)).toBe(everything);
-    expect(chooseDuckDBQueryPlanner(selection, pivot)).toBe(everything);
+  test('a planner in use is asked for every query it supports', () => {
+    expect(chooseDuckDBQueryPlanner(everything, query)).toBe(everything);
+    expect(chooseDuckDBQueryPlanner(everything, pivot)).toBe(everything);
   });
 
   test('a query the planner does not support goes to the engine', () => {
-    const selection = {
-      mode: LEGEND_DATA_CUBE_PLANNER_MODE.PLANNER,
-      planner: noPivot,
-    } as const;
-    expect(chooseDuckDBQueryPlanner(selection, query)).toBe(noPivot);
-    expect(chooseDuckDBQueryPlanner(selection, pivot)).toBeUndefined();
+    expect(chooseDuckDBQueryPlanner(noPivot, query)).toBe(noPivot);
+    expect(chooseDuckDBQueryPlanner(noPivot, pivot)).toBeUndefined();
   });
 });

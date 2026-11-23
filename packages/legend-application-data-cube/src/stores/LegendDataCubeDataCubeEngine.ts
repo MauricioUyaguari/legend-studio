@@ -143,18 +143,8 @@ import {
 import type { LegendDataCubeApplicationStore } from './LegendDataCubeBaseStore.js';
 import { LegendDataCubeDuckDBEngine } from './LegendDataCubeDuckDBEngine.js';
 import {
-  LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME,
-  LegendDataCubePlannerShadow,
-  type LegendDataCubePlannerShadowDetail,
-  type LegendDataCubePlannerShadowRecord,
-} from './planner/LegendDataCubePlannerShadow.js';
-import {
   chooseDuckDBQueryPlanner,
-  ENGINE_PLANNER_SELECTION,
-  isQuerySupportedByPlanner,
-  LEGEND_DATA_CUBE_PLANNER_MODE,
   type LegendDataCubeDuckDBQueryPlanner,
-  type LegendDataCubePlannerSelection,
   type LegendDataCubeQueryPlannerClient,
 } from './planner/LegendDataCubeQueryPlanner.js';
 import {
@@ -211,7 +201,6 @@ import {
   EXTERNAL_APPLICATION_NAVIGATION__generateLakehouseViewUrl,
 } from '../__lib__/LegendDataCubeNavigation.js';
 import { LEGEND_DATA_CUBE_DOCUMENTATION_KEY } from '../__lib__/LegendDataCubeDocumentation.js';
-import { LEGEND_DATACUBE_APP_EVENT } from '../__lib__/LegendDataCubeEvent.js';
 
 // NOTE: only the precise primitives which exist in the engine are listed, some members of
 // PRECISE_PRIMITIVE_TYPE (e.g. relational TIMESTAMP, Date, Time, Decimal) are not precise primitives.
@@ -252,22 +241,6 @@ const normalizeIngestColumnTypePath = (
     : undefined;
 };
 
-const PLANNER_SHADOW_EVENT: Record<
-  LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME,
-  LEGEND_DATACUBE_APP_EVENT
-> = {
-  [LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.MATCH]:
-    LEGEND_DATACUBE_APP_EVENT.PLANNER_SHADOW__MATCH,
-  [LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.DIFFERENT]:
-    LEGEND_DATACUBE_APP_EVENT.PLANNER_SHADOW__DIFFERENCE,
-  [LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.INCONCLUSIVE]:
-    LEGEND_DATACUBE_APP_EVENT.PLANNER_SHADOW__INCONCLUSIVE,
-  [LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.REFUSED]:
-    LEGEND_DATACUBE_APP_EVENT.PLANNER_SHADOW__REFUSAL,
-  [LEGEND_DATA_CUBE_PLANNER_SHADOW_OUTCOME.FAILED]:
-    LEGEND_DATACUBE_APP_EVENT.PLANNER_SHADOW__FAILURE,
-};
-
 export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
   private readonly _application: LegendDataCubeApplicationStore;
   private readonly _depotServerClient: DepotServerClient;
@@ -276,13 +249,11 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
   private readonly _lakehouseIngestServerClient: LakehouseIngestServerClient;
   private readonly _graphManager: V1_PureGraphManager;
   private readonly _duckDBEngine: LegendDataCubeDuckDBEngine;
-  private _plannerSelection: LegendDataCubePlannerSelection =
-    ENGINE_PLANNER_SELECTION;
+  private _plannerInUse?: LegendDataCubeDuckDBQueryPlanner | undefined;
   private readonly _plannerClients = new Map<
     LegendDataCubeDuckDBQueryPlanner,
     LegendDataCubeQueryPlannerClient
   >();
-  private readonly _plannerShadow = new LegendDataCubePlannerShadow();
   private _secondaryOauthClient?: SecondaryOAuthClient;
   private LAKEHOUSE_SECTION = '###Lakehouse';
 
@@ -336,8 +307,8 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
   /**
    * Sets how the SQL of queries on DuckDB-backed sources is generated; takes effect from the next query.
    */
-  setPlannerSelection(selection: LegendDataCubePlannerSelection) {
-    this._plannerSelection = selection;
+  setPlannerInUse(planner: LegendDataCubeDuckDBQueryPlanner | undefined) {
+    this._plannerInUse = planner;
   }
 
   /**
@@ -1814,47 +1785,21 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
     // once we either cut another protocol version or backport the DuckDB models
     // to V1_33_0, we will can remove this
     const planOptions = { ...options, clientVersion: PureClientVersion.VX_X_X };
-    const serializedQuery = this.serializeValueSpecification(query);
     const sql = this._extractSQLFromExecutionPlan(
       await this._generateExecutionPlan(
         query,
         model,
         [],
         planOptions,
-        chooseDuckDBQueryPlanner(this._plannerSelection, serializedQuery),
+        chooseDuckDBQueryPlanner(
+          this._plannerInUse,
+          this.serializeValueSpecification(query),
+        ),
       ),
     );
     const endTime = performance.now();
     const executedQuery = await queryCodePromise;
     const result = await this._duckDBEngine.runSQLQuery(sql);
-
-    const selection = this._plannerSelection;
-    if (
-      selection.mode === LEGEND_DATA_CUBE_PLANNER_MODE.SHADOW &&
-      isQuerySupportedByPlanner(selection.planner, serializedQuery)
-    ) {
-      const planner = selection.planner;
-      // NOTE: this is deliberately not awaited: the user has their result, and what follows compares
-      // it with the planner in the background. It never throws.
-      this._plannerShadow
-        .run({
-          planner: planner.key,
-          query: serializedQuery,
-          engine: { sql, result },
-          generatePlannerSQL: async () =>
-            this._extractSQLFromExecutionPlan(
-              V1_deserializeExecutionPlan(
-                await this._getPlannerClient(planner).generatePlan(
-                  this._buildGeneratePlanInput(query, model, [], planOptions),
-                ),
-              ),
-            ),
-          runSQL: (plannerSQL) => this._duckDBEngine.runSQLQuery(plannerSQL),
-          record: (record, detail) =>
-            this._recordPlannerShadow(record, detail, executedQuery),
-        })
-        .catch(() => {});
-    }
 
     return {
       executedQuery,
@@ -1875,28 +1820,6 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
     );
   }
 
-  private _recordPlannerShadow(
-    record: LegendDataCubePlannerShadowRecord,
-    detail: LegendDataCubePlannerShadowDetail,
-    queryCode: string,
-  ) {
-    // NOTE: the query and the SQL texts carry column names and filter values, so they are only
-    // logged here, in the browser; what is sent as telemetry holds counts, timings and messages
-    this.debugProcess(
-      `Planner Shadow`,
-      ['OUTCOME', record.outcome],
-      ['RECORD', record],
-      ['QUERY', queryCode],
-      ['ENGINE SQL', detail.engineSQL],
-      ['PLANNER SQL', detail.plannerSQL],
-    );
-    try {
-      this.sendTelemetry(PLANNER_SHADOW_EVENT[record.outcome], record);
-    } catch {
-      // ignore telemetry failure
-    }
-  }
-
   private async _generateExecutionPlan(
     query: V1_Lambda,
     model: PlainObject<V1_PureModelContext>,
@@ -1904,37 +1827,7 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
     options?: DataCubeExecutionOptions | undefined,
     planner?: LegendDataCubeDuckDBQueryPlanner | undefined,
   ): Promise<V1_ExecutionPlan> {
-    const input = this._buildGeneratePlanInput(
-      query,
-      model,
-      parameterValues,
-      options,
-    );
-    // NOTE: a planner's client is an engine server client, so the two are asked the same way
-    const client = planner
-      ? this._getPlannerClient(planner)
-      : this._engineServerClient;
-    try {
-      return V1_deserializeExecutionPlan(await client.generatePlan(input));
-    } catch (err) {
-      assertErrorThrown(err);
-      const error = new DataCubeExecutionError(
-        // name the planner when it is the one which failed, so that its failures are not taken for
-        // the engine server's
-        planner ? `[${planner.label}] ${err.message}` : err.message,
-      );
-      error.executeInput = input;
-      throw error;
-    }
-  }
-
-  private _buildGeneratePlanInput(
-    query: V1_Lambda,
-    model: PlainObject<V1_PureModelContext>,
-    parameterValues?: V1_ParameterValue[] | undefined,
-    options?: DataCubeExecutionOptions | undefined,
-  ) {
-    return {
+    const input = {
       clientVersion:
         options?.clientVersion ??
         // eslint-disable-next-line no-process-env
@@ -1951,6 +1844,22 @@ export class LegendDataCubeDataCubeEngine extends DataCubeEngine {
         serialize(V1_parameterValueModelSchema, parameterValue),
       ),
     };
+    // NOTE: a planner's client is an engine server client, so the two are asked the same way
+    const client = planner
+      ? this._getPlannerClient(planner)
+      : this._engineServerClient;
+    try {
+      return V1_deserializeExecutionPlan(await client.generatePlan(input));
+    } catch (err) {
+      assertErrorThrown(err);
+      const error = new DataCubeExecutionError(
+        // name the planner when it is the one which failed, so that its failures are not taken for
+        // the engine server's
+        planner ? `[${planner.label}] ${err.message}` : err.message,
+      );
+      error.executeInput = input;
+      throw error;
+    }
   }
 
   async ingestLocalFileData(data: string, format: string, refId?: string) {

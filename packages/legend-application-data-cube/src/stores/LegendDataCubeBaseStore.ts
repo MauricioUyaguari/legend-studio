@@ -56,8 +56,8 @@ import {
   LegendDataCubeSettingStorageKey,
 } from '../__lib__/LegendDataCubeSetting.js';
 import {
-  getPlannerSettingKeys,
-  resolvePlannerSelection,
+  getPlannerSettingKey,
+  resolvePlannerInUse,
   validateDuckDBQueryPlanners,
   type LegendDataCubeDuckDBQueryPlanner,
 } from './planner/LegendDataCubeQueryPlanner.js';
@@ -159,35 +159,21 @@ export class LegendDataCubeBaseStore {
           this.graphManager.TEMPORARY__getEngineConfig().setBaseUrl(newValue);
         },
       } satisfies DataCubeSetting<string>,
-      // NOTE: each planner a plugin contributes adds two settings; with none contributed, there are none
-      ...this.duckDBQueryPlanners.flatMap((planner) => {
-        const keys = getPlannerSettingKeys(planner);
-        return [
-          {
-            key: keys.use,
-            title: `Planner: Use ${planner.label} for Cached and Local Sources (Experimental)`,
-            description: `Generates the SQL for cached sources, local files and cached Iceberg tables with ${planner.label} instead of asking the engine server. A query ${planner.label} fails on fails with its message; it is not retried on the engine server.`,
-            group: DataCubeSettingGroup.DEBUG,
-            type: DataCubeSettingType.BOOLEAN,
-            defaultValue: false,
-            action: (api, newValue) => {
-              this._plannerSettingValues.set(keys.use, newValue);
-              this.applyPlannerSelection();
-            },
-          } satisfies DataCubeSetting<boolean>,
-          {
-            key: keys.shadow,
-            title: `Planner: Compare ${planner.label} with the Engine in the Background (Experimental)`,
-            description: `Keeps generating the SQL for cached sources, local files and cached Iceberg tables with the engine server, and afterwards, in the background, also generates it with ${planner.label}, runs it, and records whether the two results are the same. This has no effect when a planner is used (the setting above).`,
-            group: DataCubeSettingGroup.DEBUG,
-            type: DataCubeSettingType.BOOLEAN,
-            defaultValue: false,
-            action: (api, newValue) => {
-              this._plannerSettingValues.set(keys.shadow, newValue);
-              this.applyPlannerSelection();
-            },
-          } satisfies DataCubeSetting<boolean>,
-        ];
+      // NOTE: each planner a plugin contributes adds one setting; with none contributed, there is none
+      ...this.duckDBQueryPlanners.map((planner) => {
+        const key = getPlannerSettingKey(planner);
+        return {
+          key,
+          title: `Planner: Use ${planner.label} for Cached and Local Sources (Experimental)`,
+          description: `Generates the SQL for cached sources, local files and cached Iceberg tables with ${planner.label} instead of asking the engine server. A query ${planner.label} fails on fails with its message; it is not retried on the engine server.`,
+          group: DataCubeSettingGroup.DEBUG,
+          type: DataCubeSettingType.BOOLEAN,
+          defaultValue: false,
+          action: (api, newValue) => {
+            this._plannerSettingValues.set(key, newValue);
+            this.applyPlannerInUse();
+          },
+        } satisfies DataCubeSetting<boolean>;
       }),
     ];
 
@@ -213,17 +199,10 @@ export class LegendDataCubeBaseStore {
       this.graphManager,
     );
     this.duckDBQueryPlanners.forEach((planner) => {
-      const keys = getPlannerSettingKeys(planner);
-      this._plannerSettingValues.set(
-        keys.use,
-        this.getBooleanSettingValue(keys.use),
-      );
-      this._plannerSettingValues.set(
-        keys.shadow,
-        this.getBooleanSettingValue(keys.shadow),
-      );
+      const key = getPlannerSettingKey(planner);
+      this._plannerSettingValues.set(key, this.getBooleanSettingValue(key));
     });
-    this.applyPlannerSelection();
+    this.applyPlannerInUse();
     this.taskService = new DataCubeTaskService();
     this.layoutService = new DataCubeLayoutService();
     this.alertService = new DataCubeAlertService(
@@ -249,9 +228,9 @@ export class LegendDataCubeBaseStore {
     );
   }
 
-  private applyPlannerSelection() {
-    this.engine.setPlannerSelection(
-      resolvePlannerSelection(
+  private applyPlannerInUse() {
+    this.engine.setPlannerInUse(
+      resolvePlannerInUse(
         this.duckDBQueryPlanners,
         (key) => this._plannerSettingValues.get(key) ?? false,
       ),
